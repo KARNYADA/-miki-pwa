@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MIKI">
+  <meta name="theme-color" content="#08080f">
+  <title>MIKI</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+
+<style>
+:root {
+  --bg:       #08080f;
+  --bg2:      #0e0e1c;
+  --surface:  rgba(255,255,255,0.045);
+  --border:   rgba(255,255,255,0.07);
+  --accent:   #00e5b0;
+  --accent2:  #5b21b6;
+  --amber:    #f59e0b;
+  --red:      #ef4444;
+  --text:     #eeeef5;
+  --muted:    rgba(238,238,245,0.38);
+  --glow-g:   0 0 40px rgba(0,229,176,0.22);
+  --glow-a:   0 0 30px rgba(245,158,11,0.35);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0; padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Space Grotesk', sans-serif;
+  min-height: 100svh;
+  overflow-x: hidden;
+}
+
+/* Ambient glow background */
+body::before {
+  content: '';
+  position: fixed; inset: 0;
+  background:
+    radial-gradient(ellipse 55% 35% at 15% 10%, rgba(0,229,176,.07) 0%, transparent 55%),
+    radial-gradient(ellipse 40% 55% at 85% 90%, rgba(91,33,182,.09) 0%, transparent 55%);
+  pointer-events: none;
+}
+
+/* ─── LAYOUT ─────────────────────────────── */
+.shell {
+  position: relative;
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 0 20px 110px;
+  min-height: 100svh;
+}
+
+/* ─── HEADER ─────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 56px 0 20px;
+}
+
+.wordmark {
+  font-family: 'Syne', sans-serif;
+  font-weight: 800;
+  font-size: 26px;
+  letter-spacing: 6px;
+  color: var(--accent);
+  text-shadow: 0 0 24px rgba(0,229,176,.45);
+}
+
+.pill {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 13px;
+  border-radius: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 10px; font-weight: 600;
+  letter-spacing: 1.2px;
+  color: var(--muted);
+  transition: all .35s;
+  cursor: default;
+  user-select: none;
+}
+.pill.ok { color: var(--accent); border-color: rgba(0,229,176,.18); }
+.pill.err { color: var(--red); border-color: rgba(239,68,68,.18); }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.pill.ok .dot { animation: blink 2.4s infinite; }
+@keyframes blink { 0%,100%{opacity:1} 55%{opacity:.25} }
+
+/* ─── MIC ZONE ───────────────────────────── */
+.mic-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 28px 0 24px;
+  gap: 0;
+}
+
+.ripple-wrap {
+  position: relative;
+  width: 130px; height: 130px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 22px;
+}
+
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  opacity: 0;
+  transition: opacity .3s;
+}
+.ripple:nth-child(1) { inset:  0; }
+.ripple:nth-child(2) { inset: -14px; }
+.ripple:nth-child(3) { inset: -28px; }
+
+.ripple-wrap.alive .ripple {
+  animation: ripple-out 2s ease-out infinite;
+}
+.ripple-wrap.alive .ripple:nth-child(2) { animation-delay:.33s; }
+.ripple-wrap.alive .ripple:nth-child(3) { animation-delay:.66s; }
+
+@keyframes ripple-out {
+  0%   { transform:scale(.8); opacity:.5; }
+  100% { transform:scale(1.2); opacity:0; }
+}
+
+.mic-btn {
+  width: 130px; height: 130px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  transition: all .3s cubic-bezier(.34,1.56,.64,1);
+  position: relative; z-index: 2;
+  outline: none;
+  -webkit-user-select: none; user-select: none;
+}
+.mic-btn:active { transform: scale(.93); }
+.mic-btn.wake {
+  background: rgba(0,229,176,.1);
+  border-color: var(--accent);
+  box-shadow: var(--glow-g), inset 0 0 20px rgba(0,229,176,.05);
+}
+.mic-btn.off { opacity: .55; }
+
+.mic-icon { transition: all .3s; color: var(--accent); }
+
+/* Status label */
+.status-lbl {
+  font-family: 'Syne', sans-serif;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  transition: all .3s;
+  min-height: 18px;
+}
+.status-lbl.alive { color: var(--accent); text-shadow: 0 0 12px rgba(0,229,176,.4); }
+
+/* Wave bars */
+.waves {
+  display: flex; align-items: center; gap: 3px;
+  height: 22px;
+  margin-top: 10px;
+  opacity: 0;
+  transition: opacity .4s;
+}
+.waves.alive { opacity: 1; }
+.bar {
+  width: 3px; background: var(--accent);
+  border-radius: 2px;
+  animation: none;
+}
+.waves.alive .bar { animation: wave .75s ease-in-out infinite alternate; }
+.bar:nth-child(1){height:6px;} .bar:nth-child(2){height:12px;}
+.bar:nth-child(3){height:18px;} .bar:nth-child(4){height:22px;}
+.bar:nth-child(5){height:18px;} .bar:nth-child(6){height:12px;}
+.bar:nth-child(7){height:6px;}
+.waves.alive .bar:nth-child(1){animation-delay:.0s}
+.waves.alive .bar:nth-child(2){animation-delay:.1s}
+.waves.alive .bar:nth-child(3){animation-delay:.2s}
+.waves.alive .bar:nth-child(4){animation-delay:.3s}
+.waves.alive .bar:nth-child(5){animation-delay:.2s}
+.waves.alive .bar:nth-child(6){animation-delay:.1s}
+.waves.alive .bar:nth-child(7){animation-delay:.0s}
+
+@keyframes wave {
+  from { transform: scaleY(.3); opacity:.5; }
+  to   { transform: scaleY(1);  opacity:1;  }
+}
+
+/* ─── TRANSCRIPT ─────────────────────────── */
+.transcript {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 13px 16px;
+  margin: 4px 0 28px;
+  min-height: 50px;
+  transition: border-color .3s, background .3s;
+}
+.transcript.lit {
+  border-color: rgba(0,229,176,.28);
+  background: rgba(0,229,176,.04);
+}
+.tr-ico { font-size: 16px; flex-shrink: 0; }
+.tr-txt {
+  font-size: 13.5px; line-height: 1.45;
+  color: var(--muted);
+  font-style: italic;
+  transition: color .3s;
+}
+.tr-txt.has { color: var(--text); font-style: normal; }
+
+/* ─── SECTION LABEL ──────────────────────── */
+.sec-lbl {
+  font-family: 'Syne', sans-serif;
+  font-size: 9.5px; font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 12px;
+}
+
+/* ─── ROOM CARD ──────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  padding: 22px 22px 18px;
+  margin-bottom: 14px;
+  transition: all .4s cubic-bezier(.34,1.1,.64,1);
+  position: relative; overflow: hidden;
+}
+
+/* warm glow top-right when ON */
+.card::after {
+  content: '';
+  position: absolute;
+  top: -40%; right: -15%;
+  width: 200px; height: 200px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(245,158,11,.12) 0%, transparent 70%);
+  transition: opacity .5s;
+  opacity: 0;
+  pointer-events: none;
+}
+.card.on { border-color: rgba(245,158,11,.22); background: rgba(245,158,11,.035); }
+.card.on::after { opacity: 1; }
+
+.card-top {
+  display: flex; align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.room-meta { display: flex; align-items: center; gap: 14px; }
+
+.icon-box {
+  width: 46px; height: 46px;
+  border-radius: 13px;
+  background: rgba(255,255,255,.06);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  transition: all .4s;
+}
+.card.on .icon-box {
+  background: rgba(245,158,11,.14);
+  box-shadow: 0 0 18px rgba(245,158,11,.2);
+}
+
+.room-name {
+  font-family: 'Syne', sans-serif;
+  font-size: 14px; font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.room-state {
+  font-size: 11.5px; color: var(--muted);
+  margin-top: 3px;
+  transition: color .3s;
+}
+.card.on .room-state { color: var(--amber); }
+
+/* ─── TOGGLE ─────────────────────────────── */
+.toggle {
+  position: relative;
+  width: 54px; height: 28px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.1);
+  border: none; cursor: pointer;
+  transition: background .35s, box-shadow .35s;
+  flex-shrink: 0;
+}
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 4px; left: 4px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.4);
+  transition: transform .35s cubic-bezier(.34,1.56,.64,1), background .3s;
+}
+.toggle.on {
+  background: var(--amber);
+  box-shadow: 0 0 14px rgba(245,158,11,.4);
+}
+.toggle.on::after {
+  transform: translateX(26px);
+  background: #fff;
+}
+
+/* ─── ACTION BUTTONS ─────────────────────── */
+.btn-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.act-btn {
+  padding: 11px 8px;
+  border-radius: 11px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 13px; font-weight: 500;
+  cursor: pointer;
+  transition: all .2s;
+  letter-spacing: .2px;
+}
+.act-btn:active { transform: scale(.96); }
+.btn-on:hover  { background: rgba(245,158,11,.1); border-color: rgba(245,158,11,.3); color: var(--amber); }
+.btn-off:hover { background: rgba(239,68,68,.08);  border-color: rgba(239,68,68,.2);  color: var(--red);   }
+
+/* ─── SETTINGS FAB ───────────────────────── */
+.fab {
+  position: fixed;
+  bottom: 30px; right: 22px;
+  width: 48px; height: 48px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  z-index: 80;
+  transition: all .25s;
+}
+.fab:hover { border-color: rgba(0,229,176,.3); background: rgba(0,229,176,.07); }
+
+/* ─── SETTINGS SHEET ─────────────────────── */
+.overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 90;
+  opacity: 0; pointer-events: none;
+  transition: opacity .3s;
+}
+.overlay.show { opacity: 1; pointer-events: all; }
+
+.sheet {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: #101020;
+  border-top: 1px solid var(--border);
+  border-radius: 24px 24px 0 0;
+  padding: 20px 22px 50px;
+  z-index: 100;
+  transform: translateY(100%);
+  transition: transform .4s cubic-bezier(.34,1.1,.64,1);
+  max-width: 420px;
+  margin: 0 auto;
+}
+.sheet.open { transform: translateY(0); }
+
+.handle {
+  width: 38px; height: 4px;
+  background: rgba(255,255,255,.12);
+  border-radius: 2px;
+  margin: 0 auto 22px;
+}
+.sheet-title {
+  font-family: 'Syne', sans-serif;
+  font-size: 13px; font-weight: 700;
+  letter-spacing: 2.5px;
+  color: var(--accent);
+  margin-bottom: 18px;
+  text-transform: uppercase;
+}
+
+.fld { margin-bottom: 12px; }
+.fld label {
+  display: block;
+  font-size: 10.5px; font-weight: 600;
+  letter-spacing: 1.2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.fld input {
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color .2s;
+}
+.fld input:focus { border-color: rgba(0,229,176,.4); }
+.fld input::placeholder { color: rgba(255,255,255,.2); }
+
+.save-btn {
+  width: 100%; padding: 14px;
+  margin-top: 6px;
+  background: var(--accent);
+  color: #000;
+  border: none;
+  border-radius: 12px;
+  font-family: 'Syne', sans-serif;
+  font-size: 13px; font-weight: 800;
+  letter-spacing: 2.5px;
+  cursor: pointer;
+  transition: all .2s;
+}
+.save-btn:hover { filter: brightness(1.08); box-shadow: var(--glow-g); }
+.save-btn:active { transform: scale(.97); }
+
+/* ─── TOAST ──────────────────────────────── */
+.toast {
+  position: fixed;
+  top: 20px; left: 50%;
+  transform: translateX(-50%) translateY(-80px);
+  background: rgba(14,14,28,.9);
+  border: 1px solid rgba(0,229,176,.25);
+  backdrop-filter: blur(16px);
+  color: var(--accent);
+  padding: 10px 22px;
+  border-radius: 30px;
+  font-size: 13px; font-weight: 500;
+  z-index: 200;
+  transition: transform .4s cubic-bezier(.34,1.56,.64,1);
+  white-space: nowrap;
+  max-width: 90vw;
+  text-align: center;
+}
+.toast.show { transform: translateX(-50%) translateY(0); }
+
+/* Flash animation on command */
+@keyframes cmd-flash {
+  0%,100% {}
+  40% { box-shadow: 0 0 60px rgba(245,158,11,.6), var(--glow-a); }
+}
+.card.flash { animation: cmd-flash .6s ease-out; }
+
+</style>
+</head>
+
+<body>
+<div class="shell">
+
+  <!-- ── HEADER ───────────────────────────── -->
+  <div class="header">
+    <div class="wordmark">MIKI</div>
+    <div class="pill" id="connPill">
+      <div class="dot"></div>
+      <span id="connTxt">CONNECTING</span>
+    </div>
+  </div>
+
+  <!-- ── MIC ZONE ─────────────────────────── -->
+  <div class="mic-zone">
+    <div class="ripple-wrap" id="rippleWrap">
+      <div class="ripple"></div>
+      <div class="ripple"></div>
+      <div class="ripple"></div>
+      <button class="mic-btn" id="micBtn" onclick="toggleMic()" aria-label="Mic toggle">
+        <svg id="micSvg" class="mic-icon" width="34" height="34" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="1.5"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="status-lbl" id="statusLbl">TAP TO START</div>
+
+    <div class="waves" id="waves">
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      <div class="bar"></div>
+    </div>
+  </div>
+
+  <!-- ── TRANSCRIPT ───────────────────────── -->
+  <div class="transcript" id="transcript">
+    <span class="tr-ico">🎙</span>
+    <span class="tr-txt" id="trTxt">Bol "Miki" aur phir command...</span>
+  </div>
+
+  <!-- ── ROOMS ────────────────────────────── -->
+  <div class="sec-lbl">ROOMS</div>
+
+  <div class="card" id="card-bedroom">
+    <div class="card-top">
+      <div class="room-meta">
+        <div class="icon-box" id="ico-bedroom">🛏️</div>
+        <div>
+          <div class="room-name">Bedroom</div>
+          <div class="room-state" id="st-bedroom">Light band hai</div>
+        </div>
+      </div>
+      <button class="toggle" id="tgl-bedroom" onclick="toggleRoom('bedroom')"
+              aria-label="Bedroom light toggle"></button>
+    </div>
+    <div class="btn-row">
+      <button class="act-btn btn-on"  onclick="setRoom('bedroom','ON')">⚡ Jala do</button>
+      <button class="act-btn btn-off" onclick="setRoom('bedroom','OFF')">✕ Band karo</button>
+    </div>
+  </div>
+
+</div><!-- /shell -->
+
+<!-- ── SETTINGS FAB ─────────────────────── -->
+<div class="fab" onclick="openSheet()" role="button" aria-label="Settings">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+       stroke="rgba(255,255,255,.45)" stroke-width="1.6" stroke-linecap="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+  </svg>
+</div>
+
+<!-- ── OVERLAY ───────────────────────────── -->
+<div class="overlay" id="overlay" onclick="closeSheet()"></div>
+
+<!-- ── SETTINGS SHEET ───────────────────── -->
+<div class="sheet" id="sheet">
+  <div class="handle"></div>
+  <div class="sheet-title">MQTT CONFIG</div>
+
+  <div class="fld">
+    <label>Broker Host</label>
+    <input id="cfg-host" placeholder="xxxx.s1.eu.hivemq.cloud" autocomplete="off">
+  </div>
+  <div class="fld">
+    <label>Username</label>
+    <input id="cfg-user" placeholder="hivemq_username" autocomplete="off">
+  </div>
+  <div class="fld">
+    <label>Password</label>
+    <input id="cfg-pass" type="password" placeholder="••••••••" autocomplete="off">
+  </div>
+
+  <button class="save-btn" onclick="saveAndConnect()">SAVE &amp; CONNECT</button>
+</div>
+
+<!-- ── TOAST ─────────────────────────────── -->
+<div class="toast" id="toast"></div>
+
+
+<script>
+/* ═══════════════════════════════════════════
+   MIKI — BRAIN (PWA Logic)
+═══════════════════════════════════════════ */
+
+// ── Config ─────────────────────────────────
+const WAKE = 'miki';
+let cfg = {
+  host: localStorage.getItem('miki_host') || '',
+  user: localStorage.getItem('miki_user') || '',
+  pass: localStorage.getItem('miki_pass') || '',
+};
+
+// ── State ──────────────────────────────────
+const roomState = { bedroom: false };
+let mqttClient  = null;
+let recog       = null;
+let micOn       = false;
+let wakeActive  = false;
+let cmdTimer    = null;
+let toastTimer  = null;
+
+// ── Command Vocabulary (Hinglish) ──────────
+const VOC_ON  = ['on','jala','jalao','chala','chalo','chalu','on karo','on kar','start','kholo','켜'];
+const VOC_OFF = ['off','band','bujha','bujhao','band karo','off karo','off kar','bandh','rukao','stop'];
+const VOC_ROOM = {
+  bedroom: ['bedroom','bed room','bed','kamra','kamre','room','soone','sone','so']
+};
+
+function parseCmd(text) {
+  const t   = text.toLowerCase();
+  const isOn  = VOC_ON.some(w  => t.includes(w));
+  const isOff = VOC_OFF.some(w => t.includes(w));
+  if (!isOn && !isOff) return null;
+
+  for (const [room, aliases] of Object.entries(VOC_ROOM)) {
+    if (aliases.some(a => t.includes(a)))
+      return { room, action: isOn ? 'ON' : 'OFF' };
+  }
+  // Single room mode — assume bedroom
+  return { room: 'bedroom', action: isOn ? 'ON' : 'OFF' };
+}
+
+// ── MQTT ───────────────────────────────────
+function mqttConnect() {
+  if (!cfg.host || !cfg.user || !cfg.pass) { setConnUI('off'); return; }
+  if (mqttClient) { try { mqttClient.end(true); } catch(e){} }
+
+  const url = `wss://${cfg.host}:8884/mqtt`;
+  const cid = 'miki-pwa-' + Math.random().toString(16).slice(2,8);
+
+  mqttClient = mqtt.connect(url, {
+    clientId: cid,
+    username: cfg.user,
+    password: cfg.pass,
+    clean: true,
+    reconnectPeriod: 4000,
+    connectTimeout: 8000,
+    rejectUnauthorized: false,
+  });
+
+  mqttClient.on('connect', () => {
+    setConnUI('ok');
+    mqttClient.subscribe('miki/bedroom/light/status');
+  });
+  mqttClient.on('message', (topic, payload) => {
+    if (topic === 'miki/bedroom/light/status') {
+      applyState('bedroom', payload.toString() === 'ON', false);
+    }
+  });
+  mqttClient.on('error',   () => setConnUI('err'));
+  mqttClient.on('offline', () => setConnUI('off'));
+  mqttClient.on('reconnect', () => {
+    document.getElementById('connTxt').textContent = 'RECONNECTING';
+  });
+}
+
+function pub(topic, payload) {
+  if (!mqttClient?.connected) { toast('⚠️ Brain connected nahi — settings check karo'); return false; }
+  mqttClient.publish(topic, payload, { qos: 1, retain: true });
+  return true;
+}
+
+function setConnUI(s) {
+  const pill = document.getElementById('connPill');
+  const txt  = document.getElementById('connTxt');
+  pill.className = 'pill ' + (s === 'ok' ? 'ok' : s === 'err' ? 'err' : '');
+  txt.textContent = s === 'ok' ? 'CONNECTED' : s === 'err' ? 'ERROR' : 'OFFLINE';
+}
+
+// ── Room Control ───────────────────────────
+function applyState(room, on, send = true) {
+  roomState[room] = on;
+  document.getElementById(`card-${room}`).className = 'card' + (on ? ' on' : '');
+  document.getElementById(`tgl-${room}`).className  = 'toggle' + (on ? ' on' : '');
+  document.getElementById(`st-${room}`).textContent = on ? 'Light jali hui hai ✓' : 'Light band hai';
+
+  // Visual flash
+  const card = document.getElementById(`card-${room}`);
+  card.classList.remove('flash');
+  void card.offsetWidth;
+  card.classList.add('flash');
+
+  if (send) {
+    const ok = pub(`miki/${room}/light`, on ? 'ON' : 'OFF');
+    if (ok) toast(on ? `💡 ${room} light jali!` : `🌑 ${room} light band!`);
+  }
+}
+
+function setRoom(room, action) { applyState(room, action === 'ON'); }
+function toggleRoom(room)      { applyState(room, !roomState[room]); }
+
+// ── Voice ──────────────────────────────────
+function initRecog() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('Tera browser voice support nahi karta — Chrome use karo'); return false; }
+
+  recog = new SR();
+  recog.continuous      = true;
+  recog.interimResults  = true;
+  recog.maxAlternatives = 3;
+  recog.lang            = 'hi-IN'; // Hindi + English dono
+
+  recog.onresult = handleResult;
+  recog.onerror  = e => { if (e.error !== 'no-speech' && e.error !== 'aborted') console.warn(e.error); };
+  recog.onend    = () => { if (micOn) setTimeout(() => { try { recog.start(); } catch(e){} }, 150); };
+
+  return true;
+}
+
+function handleResult(e) {
+  let interim = '', final = '';
+  for (let i = e.resultIndex; i < e.results.length; i++) {
+    const t = e.results[i][0].transcript;
+    e.results[i].isFinal ? (final += t) : (interim += t);
+  }
+
+  // Also check alternatives for wake word
+  let allText = (final || interim).toLowerCase();
+  if (!wakeActive) {
+    let alts = '';
+    for (let i = e.resultIndex; i < e.results.length; i++)
+      for (let j = 0; j < e.results[i].length; j++)
+        alts += e.results[i][j].transcript.toLowerCase() + ' ';
+
+    if (allText.includes(WAKE) || alts.includes(WAKE) ||
+        allText.includes('mickey') || allText.includes('micky') ||
+        allText.includes('mikki') || allText.includes('niki')) {
+      triggerWake();
+    }
+    return;
+  }
+
+  // Wake mode — show transcript
+  showTranscript(allText);
+
+  // Try interim first (low latency!) then final
+  const cmd = parseCmd(allText);
+  if (cmd) {
+    clearTimeout(cmdTimer);
+    execCmd(cmd);
+    resetWake();
+    return;
+  }
+
+  // Auto-reset after 4.5s silence
+  clearTimeout(cmdTimer);
+  cmdTimer = setTimeout(resetWake, 4500);
+}
+
+function triggerWake() {
+  wakeActive = true;
+  document.getElementById('rippleWrap').classList.add('alive');
+  document.getElementById('micBtn').classList.add('wake');
+  document.getElementById('waves').classList.add('alive');
+  document.getElementById('statusLbl').textContent = 'HAN... BOL KYA KARNA HAI';
+  document.getElementById('statusLbl').classList.add('alive');
+  document.getElementById('transcript').classList.add('lit');
+  cmdTimer = setTimeout(resetWake, 5000);
+}
+
+function resetWake() {
+  wakeActive = false;
+  clearTimeout(cmdTimer);
+  document.getElementById('rippleWrap').classList.remove('alive');
+  document.getElementById('micBtn').classList.remove('wake');
+  document.getElementById('waves').classList.remove('alive');
+  document.getElementById('statusLbl').textContent = micOn ? 'SAY "MIKI" TO WAKE' : 'TAP TO START';
+  document.getElementById('statusLbl').classList.remove('alive');
+  document.getElementById('transcript').classList.remove('lit');
+  showTranscript('');
+}
+
+function execCmd(cmd) {
+  applyState(cmd.room, cmd.action === 'ON');
+}
+
+function showTranscript(text) {
+  const el = document.getElementById('trTxt');
+  if (text) { el.textContent = text; el.className = 'tr-txt has'; }
+  else       { el.textContent = 'Bol "Miki" aur phir command...'; el.className = 'tr-txt'; }
+}
+
+function toggleMic() {
+  if (!recog && !initRecog()) return;
+  micOn = !micOn;
+  const btn = document.getElementById('micBtn');
+  const lbl = document.getElementById('statusLbl');
+
+  if (micOn) {
+    try { recog.start(); } catch(e) {}
+    btn.classList.remove('off');
+    lbl.textContent = 'SAY "MIKI" TO WAKE';
+    toast('🎤 Miki sun raha hai');
+  } else {
+    recog.stop();
+    btn.classList.add('off');
+    resetWake();
+  }
+}
+
+// ── Toast ──────────────────────────────────
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+}
+
+// ── Settings sheet ─────────────────────────
+function openSheet() {
+  document.getElementById('cfg-host').value = cfg.host;
+  document.getElementById('cfg-user').value = cfg.user;
+  document.getElementById('cfg-pass').value = cfg.pass;
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('overlay').classList.add('show');
+}
+function closeSheet() {
+  document.getElementById('sheet').classList.remove('open');
+  document.getElementById('overlay').classList.remove('show');
+}
+function saveAndConnect() {
+  cfg.host = document.getElementById('cfg-host').value.trim();
+  cfg.user = document.getElementById('cfg-user').value.trim();
+  cfg.pass = document.getElementById('cfg-pass').value.trim();
+  localStorage.setItem('miki_host', cfg.host);
+  localStorage.setItem('miki_user', cfg.user);
+  localStorage.setItem('miki_pass', cfg.pass);
+  closeSheet();
+  mqttConnect();
+  toast('✅ Saved! Connecting to brain...');
+}
+
+// ── Init ───────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  mqttConnect();
+
+  // If no config → open settings immediately
+  if (!cfg.host) {
+    setTimeout(openSheet, 700);
+    toast('⚙️ Pehle MQTT config set karo');
+  }
+
+  // Auto-start mic after brief delay
+  setTimeout(() => { if (!micOn) toggleMic(); }, 1200);
+});
+</script>
+</body>
+</html>
