@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="MIKI">
+  <meta name="theme-color" content="#08080f">
+  <title>MIKI</title>
+  <link rel="manifest" href="manifest.json">
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<style>
+:root{
+  --bg:#08080f;--bg2:#0e0e1c;--surface:rgba(255,255,255,.045);
+  --border:rgba(255,255,255,.08);--accent:#00e5b0;--amber:#f59e0b;
+  --red:#ef4444;--purple:#a855f7;--blue:#3b82f6;
+  --text:#eeeef5;--muted:rgba(238,238,245,.38);
+  --glow-g:0 0 40px rgba(0,229,176,.2);--glow-a:0 0 28px rgba(245,158,11,.3);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;min-height:100svh;overflow-x:hidden;padding-bottom:80px}
+body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellipse 60% 40% at 20% 8%,rgba(0,229,176,.06) 0%,transparent 55%),radial-gradient(ellipse 45% 60% at 80% 92%,rgba(91,33,182,.08) 0%,transparent 55%);pointer-events:none;z-index:0}
+.shell{position:relative;max-width:430px;margin:0 auto;padding:0 18px;z-index:1}
+
+/* HEADER */
+.header{display:flex;align-items:center;justify-content:space-between;padding:52px 0 8px}
+.brand{display:flex;flex-direction:column}
+.wordmark{font-family:'Syne',sans-serif;font-weight:800;font-size:28px;letter-spacing:7px;color:var(--accent);text-shadow:0 0 28px rgba(0,229,176,.5);line-height:1}
+.by-line{font-size:9px;color:var(--muted);letter-spacing:2px;margin-top:3px;font-weight:500}
+.by-line span{color:rgba(0,229,176,.5)}
+.pill{display:flex;align-items:center;gap:6px;padding:7px 13px;border-radius:24px;background:var(--surface);border:1px solid var(--border);font-size:10px;font-weight:600;letter-spacing:1.2px;color:var(--muted);user-select:none;transition:all .3s}
+.pill.ok{color:var(--accent);border-color:rgba(0,229,176,.2)}.pill.err{color:var(--red);border-color:rgba(239,68,68,.2)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor}.pill.ok .dot{animation:blink 2.4s infinite}
+@keyframes blink{0%,100%{opacity:1}55%{opacity:.3}}
+
+/* MIC ZONE */
+.mic-zone{display:flex;flex-direction:column;align-items:center;padding:20px 0 16px}
+.ripple-wrap{position:relative;width:118px;height:118px;display:flex;align-items:center;justify-content:center;margin-bottom:14px}
+.ripple{position:absolute;border-radius:50%;border:1.5px solid var(--accent);opacity:0}
+.ripple:nth-child(1){inset:0}.ripple:nth-child(2){inset:-13px}.ripple:nth-child(3){inset:-26px}
+.ripple-wrap.alive .ripple{animation:ripout 2s ease-out infinite}
+.ripple-wrap.alive .ripple:nth-child(2){animation-delay:.32s}.ripple-wrap.alive .ripple:nth-child(3){animation-delay:.64s}
+@keyframes ripout{0%{transform:scale(.85);opacity:.55}100%{transform:scale(1.18);opacity:0}}
+.mic-btn{width:118px;height:118px;border-radius:50%;background:var(--surface);border:1.5px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .3s cubic-bezier(.34,1.56,.64,1);position:relative;z-index:2;outline:none;user-select:none}
+.mic-btn:active{transform:scale(.93)}
+.mic-btn.wake{background:rgba(0,229,176,.1);border-color:var(--accent);box-shadow:var(--glow-g)}
+.mic-btn.off{opacity:.5}
+.mic-icon{color:var(--accent);transition:all .3s}
+.status-lbl{font-family:'Syne',sans-serif;font-size:11px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted);transition:all .3s}
+.status-lbl.alive{color:var(--accent);text-shadow:0 0 14px rgba(0,229,176,.5)}
+.waves{display:flex;align-items:center;gap:3px;height:20px;margin-top:8px;opacity:0;transition:opacity .4s}
+.waves.alive{opacity:1}
+.bar{width:3px;border-radius:2px;background:var(--accent)}
+.waves.alive .bar{animation:wave .7s ease-in-out infinite alternate}
+.bar:nth-child(1){height:5px}.bar:nth-child(2){height:11px}.bar:nth-child(3){height:17px}.bar:nth-child(4){height:20px}.bar:nth-child(5){height:17px}.bar:nth-child(6){height:11px}.bar:nth-child(7){height:5px}
+.waves.alive .bar:nth-child(1){animation-delay:0s}.waves.alive .bar:nth-child(2){animation-delay:.1s}.waves.alive .bar:nth-child(3){animation-delay:.2s}.waves.alive .bar:nth-child(4){animation-delay:.3s}.waves.alive .bar:nth-child(5){animation-delay:.2s}.waves.alive .bar:nth-child(6){animation-delay:.1s}.waves.alive .bar:nth-child(7){animation-delay:0s}
+@keyframes wave{from{transform:scaleY(.28);opacity:.45}to{transform:scaleY(1);opacity:1}}
+
+/* DEBUG + TRANSCRIPT */
+.live-box{background:rgba(0,0,0,.28);border:1px solid var(--border);border-radius:12px;padding:9px 14px;margin:8px 0 6px;min-height:36px;display:flex;align-items:center;gap:8px}
+.live-ico{font-size:12px;opacity:.45;flex-shrink:0}
+.live-txt{font-size:12px;color:rgba(0,229,176,.55);font-family:monospace;line-height:1.4;word-break:break-all}
+.transcript{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:12px 15px;margin:0 0 20px;min-height:46px;transition:border-color .3s,background .3s}
+.transcript.lit{border-color:rgba(0,229,176,.3);background:rgba(0,229,176,.04)}
+.tr-ico{font-size:15px;flex-shrink:0}.tr-txt{font-size:13px;color:var(--muted);font-style:italic;line-height:1.45;transition:color .3s}
+.tr-txt.has{color:var(--text);font-style:normal}
+
+/* SECTION LABEL */
+.sec-lbl{font-family:'Syne',sans-serif;font-size:9px;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:var(--muted);margin-bottom:11px}
+
+/* SWITCH CARD */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:22px;margin-bottom:14px;overflow:hidden;transition:all .4s cubic-bezier(.34,1.1,.64,1);position:relative}
+.card::before{content:'';position:absolute;top:-50%;right:-10%;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(245,158,11,.1) 0%,transparent 70%);opacity:0;transition:opacity .5s;pointer-events:none}
+.card.on{border-color:rgba(245,158,11,.22);background:rgba(245,158,11,.03)}.card.on::before{opacity:1}
+.card-main{padding:18px 18px 14px}
+.card-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.room-meta{display:flex;align-items:center;gap:12px;flex:1;min-width:0}
+.icon-box{width:44px;height:44px;border-radius:12px;background:rgba(255,255,255,.06);display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0;transition:all .4s}
+.card.on .icon-box{background:rgba(245,158,11,.14);box-shadow:0 0 16px rgba(245,158,11,.2)}
+.room-info{flex:1;min-width:0}
+.room-name-wrap{display:flex;align-items:center;gap:6px}
+.room-name{font-family:'Syne',sans-serif;font-size:13.5px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.edit-btn{background:none;border:none;cursor:pointer;padding:2px 4px;color:var(--muted);font-size:12px;flex-shrink:0;opacity:0;transition:opacity .2s;line-height:1}
+.card:hover .edit-btn,.card:focus-within .edit-btn{opacity:1}
+.name-input{font-family:'Syne',sans-serif;font-size:13.5px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;background:rgba(0,229,176,.08);border:1px solid rgba(0,229,176,.3);border-radius:6px;color:var(--accent);padding:2px 8px;outline:none;width:100%;max-width:160px}
+.room-state{font-size:11px;color:var(--muted);margin-top:2px;transition:color .3s}.card.on .room-state{color:var(--amber)}
+.toggle{position:relative;width:52px;height:27px;border-radius:14px;background:rgba(255,255,255,.1);border:none;cursor:pointer;transition:background .35s,box-shadow .35s;flex-shrink:0}
+.toggle::after{content:'';position:absolute;top:3.5px;left:3.5px;width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.4);transition:transform .35s cubic-bezier(.34,1.56,.64,1),background .3s}
+.toggle.on{background:var(--amber);box-shadow:0 0 12px rgba(245,158,11,.4)}.toggle.on::after{transform:translateX(25px);background:#fff}
+.btn-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.act-btn{padding:10px 8px;border-radius:10px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:'Space Grotesk',sans-serif;font-size:12.5px;font-weight:500;cursor:pointer;transition:all .2s}
+.act-btn:active{transform:scale(.95)}
+.btn-on:hover,.btn-on:focus{background:rgba(245,158,11,.1);border-color:rgba(245,158,11,.3);color:var(--amber)}
+.btn-off:hover,.btn-off:focus{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.2);color:var(--red)}
+
+/* SCHEDULE SECTION (inside card) */
+.sched-divider{height:1px;background:var(--border);margin:14px 0 0}
+.sched-section{padding:12px 18px 16px}
+.sched-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;cursor:pointer;user-select:none}
+.sched-title{font-family:'Syne',sans-serif;font-size:9px;font-weight:700;letter-spacing:2.5px;text-transform:uppercase;color:var(--muted);display:flex;align-items:center;gap:6px}
+.sched-chevron{font-size:10px;color:var(--muted);transition:transform .25s}
+.sched-chevron.open{transform:rotate(180deg)}
+.sched-body{overflow:hidden;transition:max-height .3s ease,opacity .3s;max-height:0;opacity:0}
+.sched-body.open{max-height:200px;opacity:1}
+.sched-row{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.sched-row:last-child{margin-bottom:0}
+.sched-badge{display:inline-flex;align-items:center;gap:4px;font-family:'Syne',sans-serif;font-size:9.5px;font-weight:700;letter-spacing:1px;padding:4px 9px;border-radius:20px;flex-shrink:0;width:62px;justify-content:center}
+.badge-on{background:rgba(245,158,11,.12);color:var(--amber)}
+.badge-off{background:rgba(239,68,68,.1);color:var(--red)}
+.time-input{flex:1;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:9px;padding:8px 10px;color:var(--text);font-family:'Syne',sans-serif;font-size:15px;font-weight:700;outline:none;transition:border-color .2s;min-width:0;-webkit-appearance:none;color-scheme:dark}
+.time-input:focus{border-color:rgba(0,229,176,.35)}
+.mini-toggle{position:relative;width:38px;height:21px;border-radius:11px;background:rgba(255,255,255,.08);border:none;cursor:pointer;transition:background .3s;flex-shrink:0}
+.mini-toggle::after{content:'';position:absolute;top:2.5px;left:2.5px;width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.3);transition:transform .3s cubic-bezier(.34,1.56,.64,1),background .3s}
+.mini-toggle.on{background:var(--accent)}.mini-toggle.on::after{transform:translateX(17px);background:#fff}
+
+/* SETTINGS FAB */
+.fab{position:fixed;bottom:26px;right:20px;width:50px;height:50px;border-radius:50%;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;z-index:80;transition:all .25s;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+.fab:hover{border-color:rgba(0,229,176,.3);background:rgba(0,229,176,.07)}
+
+/* SHEET */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:90;opacity:0;pointer-events:none;transition:opacity .3s}
+.overlay.show{opacity:1;pointer-events:all}
+.sheet{position:fixed;bottom:0;left:0;right:0;background:#0d0d1f;border-top:1px solid var(--border);border-radius:24px 24px 0 0;padding:18px 22px 50px;z-index:100;transform:translateY(100%);transition:transform .38s cubic-bezier(.34,1.1,.64,1);max-width:430px;margin:0 auto}
+.sheet.open{transform:translateY(0)}
+.handle{width:36px;height:4px;background:rgba(255,255,255,.1);border-radius:2px;margin:0 auto 20px}
+.sheet-title{font-family:'Syne',sans-serif;font-size:12px;font-weight:700;letter-spacing:2.5px;color:var(--accent);margin-bottom:18px;text-transform:uppercase}
+.fld{margin-bottom:12px}
+.fld label{display:block;font-size:10px;font-weight:600;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+.fld input{width:100%;padding:11px 14px;background:var(--surface);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:'Space Grotesk',sans-serif;font-size:14px;outline:none;transition:border-color .2s}
+.fld input:focus{border-color:rgba(0,229,176,.4)}.fld input::placeholder{color:rgba(255,255,255,.2)}
+.save-btn{width:100%;padding:14px;margin-top:8px;background:var(--accent);color:#000;border:none;border-radius:12px;font-family:'Syne',sans-serif;font-size:13px;font-weight:800;letter-spacing:2.5px;cursor:pointer;transition:all .2s}
+.save-btn:hover{filter:brightness(1.07);box-shadow:var(--glow-g)}.save-btn:active{transform:scale(.97)}
+
+/* TOAST */
+.toast{position:fixed;top:18px;left:50%;transform:translateX(-50%) translateY(-90px);background:rgba(10,10,25,.92);border:1px solid rgba(0,229,176,.22);backdrop-filter:blur(20px);color:var(--accent);padding:10px 22px;border-radius:30px;font-size:13px;font-weight:500;z-index:200;transition:transform .38s cubic-bezier(.34,1.56,.64,1);white-space:nowrap;max-width:92vw;text-align:center}
+.toast.show{transform:translateX(-50%) translateY(0)}
+@keyframes flash{0%,100%{}45%{box-shadow:0 0 55px rgba(245,158,11,.55),var(--glow-a)}}
+.card.flash{animation:flash .55s ease-out}
+
+/* FOOTER */
+.footer{text-align:center;padding:24px 0 10px;font-size:10px;color:rgba(255,255,255,.15);letter-spacing:1.5px}
+.footer span{color:rgba(0,229,176,.3)}
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- HEADER -->
+  <div class="header">
+    <div class="brand">
+      <div class="wordmark">MIKI</div>
+      <div class="by-line">SMART HOME · BY <span>KARN YADAV</span></div>
+    </div>
+    <div class="pill" id="connPill"><div class="dot"></div><span id="connTxt">CONNECTING</span></div>
+  </div>
+
+  <!-- MIC -->
+  <div class="mic-zone">
+    <div class="ripple-wrap" id="rippleWrap">
+      <div class="ripple"></div><div class="ripple"></div><div class="ripple"></div>
+      <button class="mic-btn" id="micBtn" onclick="toggleMic()">
+        <svg class="mic-icon" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a3 3 0 0 1 3 3v7a3 3 0 0 1-6 0V5a3 3 0 0 1 3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+      </button>
+    </div>
+    <div class="status-lbl" id="statusLbl">TAP TO START</div>
+    <div class="waves" id="waves">
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+      <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
+    </div>
+  </div>
+
+  <!-- LIVE DEBUG -->
+  <div class="live-box">
+    <span class="live-ico">👂</span>
+    <span class="live-txt" id="liveText">Mic band hai — tap karke start karo</span>
+  </div>
+
+  <!-- TRANSCRIPT -->
+  <div class="transcript" id="transcript">
+    <span class="tr-ico">🎙</span>
+    <span class="tr-txt" id="trTxt">"Miki" bolo phir command do...</span>
+  </div>
+
+  <!-- SECTION: ROOMS -->
+  <div class="sec-lbl">SWITCHES</div>
+
+  <!-- SWITCH 1: BEDROOM (fixed) -->
+  <div id="card-s1" class="card">
+    <div class="card-main">
+      <div class="card-top">
+        <div class="room-meta">
+          <div class="icon-box" id="ico-s1">🛏️</div>
+          <div class="room-info">
+            <div class="room-name-wrap">
+              <div class="room-name" id="name-s1">BEDROOM</div>
+            </div>
+            <div class="room-state" id="st-s1">Light band hai</div>
+          </div>
+        </div>
+        <button class="toggle" id="tgl-s1" onclick="toggleSwitch('s1')"></button>
+      </div>
+      <div class="btn-row">
+        <button class="act-btn btn-on"  onclick="setSwitch('s1','ON')">⚡ Jala do</button>
+        <button class="act-btn btn-off" onclick="setSwitch('s1','OFF')">✕ Band karo</button>
+      </div>
+    </div>
+    <div class="sched-divider"></div>
+    <div class="sched-section">
+      <div class="sched-header" onclick="toggleSched('s1')">
+        <div class="sched-title">⏰ AUTO SCHEDULE</div>
+        <span class="sched-chevron" id="chev-s1">▼</span>
+      </div>
+      <div class="sched-body" id="sched-s1">
+        <div class="sched-row">
+          <span class="sched-badge badge-on">💡 ON</span>
+          <input class="time-input" type="time" id="ton-s1" onchange="saveSchedule('s1')">
+          <button class="mini-toggle" id="mtgl-ton-s1" onclick="toggleSchedItem('s1','on')"></button>
+        </div>
+        <div class="sched-row">
+          <span class="sched-badge badge-off">🌑 OFF</span>
+          <input class="time-input" type="time" id="toff-s1" onchange="saveSchedule('s1')">
+          <button class="mini-toggle" id="mtgl-toff-s1" onclick="toggleSchedItem('s1','off')"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SWITCH 2: CUSTOM (editable) -->
+  <div id="card-s2" class="card">
+    <div class="card-main">
+      <div class="card-top">
+        <div class="room-meta">
+          <div class="icon-box" id="ico-s2">💡</div>
+          <div class="room-info">
+            <div class="room-name-wrap">
+              <div class="room-name" id="name-s2">SWITCH 2</div>
+              <button class="edit-btn" onclick="startEdit('s2')" title="Naam badlo">✏️</button>
+            </div>
+            <div class="room-state" id="st-s2">Light band hai</div>
+          </div>
+        </div>
+        <button class="toggle" id="tgl-s2" onclick="toggleSwitch('s2')"></button>
+      </div>
+      <div class="btn-row">
+        <button class="act-btn btn-on"  onclick="setSwitch('s2','ON')">⚡ Jala do</button>
+        <button class="act-btn btn-off" onclick="setSwitch('s2','OFF')">✕ Band karo</button>
+      </div>
+    </div>
+    <div class="sched-divider"></div>
+    <div class="sched-section">
+      <div class="sched-header" onclick="toggleSched('s2')">
+        <div class="sched-title">⏰ AUTO SCHEDULE</div>
+        <span class="sched-chevron" id="chev-s2">▼</span>
+      </div>
+      <div class="sched-body" id="sched-s2">
+        <div class="sched-row">
+          <span class="sched-badge badge-on">💡 ON</span>
+          <input class="time-input" type="time" id="ton-s2" onchange="saveSchedule('s2')">
+          <button class="mini-toggle" id="mtgl-ton-s2" onclick="toggleSchedItem('s2','on')"></button>
+        </div>
+        <div class="sched-row">
+          <span class="sched-badge badge-off">🌑 OFF</span>
+          <input class="time-input" type="time" id="toff-s2" onchange="saveSchedule('s2')">
+          <button class="mini-toggle" id="mtgl-toff-s2" onclick="toggleSchedItem('s2','off')"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SWITCH 3: CUSTOM (editable) -->
+  <div id="card-s3" class="card">
+    <div class="card-main">
+      <div class="card-top">
+        <div class="room-meta">
+          <div class="icon-box" id="ico-s3">🔆</div>
+          <div class="room-info">
+            <div class="room-name-wrap">
+              <div class="room-name" id="name-s3">SWITCH 3</div>
+              <button class="edit-btn" onclick="startEdit('s3')" title="Naam badlo">✏️</button>
+            </div>
+            <div class="room-state" id="st-s3">Light band hai</div>
+          </div>
+        </div>
+        <button class="toggle" id="tgl-s3" onclick="toggleSwitch('s3')"></button>
+      </div>
+      <div class="btn-row">
+        <button class="act-btn btn-on"  onclick="setSwitch('s3','ON')">⚡ Jala do</button>
+        <button class="act-btn btn-off" onclick="setSwitch('s3','OFF')">✕ Band karo</button>
+      </div>
+    </div>
+    <div class="sched-divider"></div>
+    <div class="sched-section">
+      <div class="sched-header" onclick="toggleSched('s3')">
+        <div class="sched-title">⏰ AUTO SCHEDULE</div>
+        <span class="sched-chevron" id="chev-s3">▼</span>
+      </div>
+      <div class="sched-body" id="sched-s3">
+        <div class="sched-row">
+          <span class="sched-badge badge-on">💡 ON</span>
+          <input class="time-input" type="time" id="ton-s3" onchange="saveSchedule('s3')">
+          <button class="mini-toggle" id="mtgl-ton-s3" onclick="toggleSchedItem('s3','on')"></button>
+        </div>
+        <div class="sched-row">
+          <span class="sched-badge badge-off">🌑 OFF</span>
+          <input class="time-input" type="time" id="toff-s3" onchange="saveSchedule('s3')">
+          <button class="mini-toggle" id="mtgl-toff-s3" onclick="toggleSchedItem('s3','off')"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">MIKI · SMART HOME SYSTEM · <span>KARN YADAV</span></div>
+</div>
+
+<!-- SETTINGS FAB -->
+<div class="fab" onclick="openSheet()" title="MQTT Settings">
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,.4)" stroke-width="1.6" stroke-linecap="round">
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+  </svg>
+</div>
+
+<div class="overlay" id="overlay" onclick="closeSheet()"></div>
+<div class="sheet" id="sheet">
+  <div class="handle"></div>
+  <div class="sheet-title">MQTT CONFIG</div>
+  <div class="fld"><label>Broker Host</label><input id="cfg-host" placeholder="xxxx.s1.eu.hivemq.cloud" autocomplete="off"></div>
+  <div class="fld"><label>Username</label><input id="cfg-user" placeholder="hivemq_username" autocomplete="off"></div>
+  <div class="fld"><label>Password</label><input id="cfg-pass" type="password" placeholder="••••••••" autocomplete="off"></div>
+  <button class="save-btn" onclick="saveAndConnect()">SAVE &amp; CONNECT</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════
+   MIKI — v3  |  Smart Home System
+   Author: Karn Yadav
+═══════════════════════════════════════════════════ */
+
+// ─── Config ──────────────────────────────────────
+const SWITCHES = ['s1','s2','s3'];
+const TOPIC_BASE = 'miki';
+
+// MQTT
+let cfg = {
+  host: localStorage.getItem('miki_host') || '',
+  user: localStorage.getItem('miki_user') || '',
+  pass: localStorage.getItem('miki_pass') || '',
+};
+
+// Switch state
+const state = { s1: false, s2: false, s3: false };
+
+// Custom names (editable)
+const names = {
+  s1: 'BEDROOM',
+  s2: localStorage.getItem('miki_name_s2') || 'SWITCH 2',
+  s3: localStorage.getItem('miki_name_s3') || 'SWITCH 3',
+};
+
+// Schedules per switch
+// { on: { time:'07:00', enabled:false }, off: { time:'23:00', enabled:false } }
+const schedules = {};
+SWITCHES.forEach(id => {
+  const saved = localStorage.getItem(`miki_sched_${id}`);
+  schedules[id] = saved ? JSON.parse(saved) : {
+    on:  { time: '', enabled: false },
+    off: { time: '', enabled: false },
+  };
+});
+
+// ─── MQTT ────────────────────────────────────────
+let mqttClient = null;
+
+function mqttConnect() {
+  if (!cfg.host || !cfg.user || !cfg.pass) { setConnUI('off'); return; }
+  if (mqttClient) { try { mqttClient.end(true); } catch(e){} }
+  const url = `wss://${cfg.host}:8884/mqtt`;
+  const cid = 'miki-pwa-' + Math.random().toString(16).slice(2,8);
+  mqttClient = mqtt.connect(url, {
+    clientId: cid, username: cfg.user, password: cfg.pass,
+    clean: true, reconnectPeriod: 4000, connectTimeout: 8000,
+    rejectUnauthorized: false,
+  });
+  mqttClient.on('connect', () => {
+    setConnUI('ok');
+    SWITCHES.forEach(id => mqttClient.subscribe(`${TOPIC_BASE}/${id}/status`));
+  });
+  mqttClient.on('message', (topic, payload) => {
+    SWITCHES.forEach(id => {
+      if (topic === `${TOPIC_BASE}/${id}/status`)
+        applyState(id, payload.toString() === 'ON', false);
+    });
+  });
+  mqttClient.on('error',    () => setConnUI('err'));
+  mqttClient.on('offline',  () => setConnUI('off'));
+  mqttClient.on('reconnect',() => { document.getElementById('connTxt').textContent = 'RECONNECTING'; });
+}
+
+function pub(id, val) {
+  if (!mqttClient?.connected) { toast('⚠️ Brain connected nahi — settings check karo'); return false; }
+  mqttClient.publish(`${TOPIC_BASE}/${id}/light`, val, { qos: 1, retain: true });
+  return true;
+}
+
+function setConnUI(s) {
+  const pill = document.getElementById('connPill');
+  const txt  = document.getElementById('connTxt');
+  pill.className = 'pill ' + (s==='ok'?'ok':s==='err'?'err':'');
+  txt.textContent = s==='ok'?'CONNECTED':s==='err'?'ERROR':'OFFLINE';
+}
+
+// ─── SWITCH CONTROL ──────────────────────────────
+function applyState(id, on, send=true) {
+  state[id] = on;
+  document.getElementById(`card-${id}`).className = 'card' + (on?' on':'');
+  document.getElementById(`tgl-${id}`).className  = 'toggle' + (on?' on':'');
+  const label = names[id];
+  document.getElementById(`st-${id}`).textContent = on ? 'Light jali hui ✓' : 'Light band hai';
+  const card = document.getElementById(`card-${id}`);
+  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+  if (send) {
+    if (pub(id, on?'ON':'OFF'))
+      toast(on ? `💡 ${label} — Jal gayi!` : `🌑 ${label} — Band!`);
+  }
+}
+
+function setSwitch(id, action) { applyState(id, action==='ON'); }
+function toggleSwitch(id)      { applyState(id, !state[id]); }
+
+// ─── SWITCH NAME EDITING ──────────────────────────
+function startEdit(id) {
+  const nameEl = document.getElementById(`name-${id}`);
+  const current = names[id];
+  nameEl.outerHTML = `<input class="name-input" id="name-${id}" value="${current}"
+    onblur="finishEdit('${id}')" onkeydown="if(event.key==='Enter')finishEdit('${id}')"
+    maxlength="12" autofocus>`;
+  setTimeout(() => { const el = document.getElementById(`name-${id}`); if(el){el.focus();el.select();} }, 10);
+}
+
+function finishEdit(id) {
+  const input = document.getElementById(`name-${id}`);
+  if (!input) return;
+  const val = input.value.trim().toUpperCase() || `SWITCH ${id.slice(1)}`;
+  names[id] = val;
+  if (id !== 's1') localStorage.setItem(`miki_name_${id}`, val);
+  input.outerHTML = `<div class="room-name" id="name-${id}">${val}</div>`;
+}
+
+// ─── SCHEDULE (inside card) ───────────────────────
+function toggleSched(id) {
+  const body  = document.getElementById(`sched-${id}`);
+  const chev  = document.getElementById(`chev-${id}`);
+  const open  = body.classList.toggle('open');
+  chev.classList.toggle('open', open);
+}
+
+function saveSchedule(id) {
+  schedules[id].on.time  = document.getElementById(`ton-${id}`).value;
+  schedules[id].off.time = document.getElementById(`toff-${id}`).value;
+  localStorage.setItem(`miki_sched_${id}`, JSON.stringify(schedules[id]));
+}
+
+function toggleSchedItem(id, type) {
+  const key  = `mtgl-t${type}-${id}`;
+  const btn  = document.getElementById(key);
+  const item = type === 'on' ? schedules[id].on : schedules[id].off;
+  item.enabled = !item.enabled;
+  btn.className = 'mini-toggle' + (item.enabled?' on':'');
+  localStorage.setItem(`miki_sched_${id}`, JSON.stringify(schedules[id]));
+  toast(item.enabled ? `✅ Auto-${type.toUpperCase()} active` : `⏸ Auto-${type.toUpperCase()} paused`);
+}
+
+function restoreScheduleUI() {
+  SWITCHES.forEach(id => {
+    const s = schedules[id];
+    document.getElementById(`ton-${id}`).value  = s.on.time  || '';
+    document.getElementById(`toff-${id}`).value = s.off.time || '';
+    document.getElementById(`mtgl-ton-${id}`).className  = 'mini-toggle' + (s.on.enabled?' on':'');
+    document.getElementById(`mtgl-toff-${id}`).className = 'mini-toggle' + (s.off.enabled?' on':'');
+  });
+}
+
+// Check schedules every 30 sec
+function checkSchedules() {
+  const now = new Date();
+  const hh  = now.getHours();
+  const mm  = now.getMinutes();
+  const cur = `${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+  const dayKey = `${now.getDate()}-${hh}-${mm}`;
+
+  SWITCHES.forEach(id => {
+    const s = schedules[id];
+    ['on','off'].forEach(type => {
+      const item = s[type];
+      if (!item.enabled || !item.time) return;
+      if (item.time === cur) {
+        const fkey = `miki_fired_${id}_${type}`;
+        if (localStorage.getItem(fkey) === dayKey) return; // already fired today
+        localStorage.setItem(fkey, dayKey);
+        const on = type === 'on';
+        applyState(id, on);
+        toast(`⏰ ${names[id]} auto-${on?'ON':'OFF'} — ${cur}`);
+      }
+    });
+  });
+}
+
+// ─── VOICE — WAKE WORD ENGINE ─────────────────────
+/*
+  Root cause analysis:
+  - "Miki" in hi-IN → Google maps it to many phonetic matches (Vicky, Niki etc.)
+  - Fix: Use en-IN (Hinglish mode) + strict positive list + explicit false-positive blacklist
+  - Only accept if: (a) in accept list AND (b) NOT in reject list
+*/
+
+const WAKE_ACCEPT = [
+  'miki','mikki','meeki','mikey','micky','mickey','micky','michi',
+  'mike e','mike-e','miky','meke','meaky','mikee','miki '
+];
+// Explicitly reject known false positives Google returns for "miki"
+const WAKE_REJECT = [
+  'vicky','vikki','niki','nicky','nikki','ricki','ricky','riki',
+  'tiki','dicky','dicky','tricky','sticky','picky','kiki','wiki',
+  'bikey','bicky','piki','fiki','sicky','dicky'
+];
+
+function isWakeWord(text) {
+  const t = ' ' + text.toLowerCase().trim() + ' ';
+  const rejected = WAKE_REJECT.some(w => t.includes(' '+w+' ') || t.includes(' '+w+',') || t.includes(w+' '));
+  if (rejected) return false;
+  return WAKE_ACCEPT.some(w => t.includes(w));
+}
+
+// Voice command vocab
+const VOC_ON  = ['on','jala','jalao','chala','chalo','chalu','start','켜',
+                 'jal','jalo','jala do','on kar','on karo','on kar do',
+                 'chalu kar','chalu karo','light on','turn on','switch on'];
+const VOC_OFF = ['off','band','bujha','bujhao','bandh','stop','rukao',
+                 'bujha do','band kar','band karo','band kar do','off kar',
+                 'off karo','off kar do','light off','turn off','switch off'];
+
+// Room aliases → switch ID
+const ROOM_ALIASES = {
+  s1: ['bedroom','bed room','bed','kamra','kamre','sone','soone','s1','switch 1','ek'],
+  s2: ['hall','drawing','living','baithak','bahar','s2','switch 2','do','दो'],
+  s3: ['kitchen','rasoi','khana','balcony','bahar','terrace','s3','switch 3','teen','तीन'],
+};
+
+function parseSwitchId(text) {
+  const t = text.toLowerCase();
+  // Also check custom names
+  for (const id of SWITCHES) {
+    if (t.includes(names[id].toLowerCase())) return id;
+  }
+  for (const [id, aliases] of Object.entries(ROOM_ALIASES)) {
+    if (aliases.some(a => t.includes(a))) return id;
+  }
+  return null; // will default to bedroom
+}
+
+function parseCmd(text) {
+  const t = text.toLowerCase();
+  const isOn  = VOC_ON.some(w  => t.includes(w));
+  const isOff = VOC_OFF.some(w => t.includes(w));
+  if (!isOn && !isOff) return null;
+  const switchId = parseSwitchId(t) || 's1'; // default bedroom
+  return { id: switchId, action: isOn ? 'ON' : 'OFF' };
+}
+
+// ─── SPEECH RECOGNITION ──────────────────────────
+let recog      = null;
+let micOn      = false;
+let wakeActive = false;
+let cmdTimer   = null;
+let restarting = false;
+
+function initRecog() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { toast('Chrome use karo — voice support chahiye'); return false; }
+  recog = new SR();
+  recog.continuous     = true;
+  recog.interimResults = true;
+  recog.maxAlternatives= 6;
+
+  // ★ KEY FIX: en-IN = Hinglish mode + "Miki" sahi se sunata hai
+  recog.lang = 'en-IN';
+
+  recog.onresult = (e) => {
+    // Collect ALL alternatives from ALL results
+    const texts = [];
+    for (let i = e.resultIndex; i < e.results.length; i++)
+      for (let j = 0; j < e.results[i].length; j++)
+        texts.push(e.results[i][j].transcript.toLowerCase().trim());
+
+    const best = texts[0] || '';
+    // Show raw in debug
+    document.getElementById('liveText').textContent = texts.join(' | ') || '...';
+
+    if (!wakeActive) {
+      // ★ STRICT CHECK: check all alternatives but reject false positives
+      const foundWake = texts.some(t => isWakeWord(t));
+      if (foundWake) triggerWake();
+      return;
+    }
+
+    showTranscript(best);
+
+    // Check all alternatives for command
+    let cmd = null;
+    for (const t of texts) { cmd = parseCmd(t); if (cmd) break; }
+
+    if (cmd) {
+      clearTimeout(cmdTimer);
+      applyState(cmd.id, cmd.action === 'ON');
+      resetWake();
+      return;
+    }
+
+    clearTimeout(cmdTimer);
+    cmdTimer = setTimeout(resetWake, 5000);
+  };
+
+  recog.onerror = (e) => {
+    if (e.error === 'not-allowed') toast('❌ Mic permission deny — browser settings check karo');
+  };
+  recog.onend = () => {
+    if (micOn && !restarting) {
+      restarting = true;
+      setTimeout(() => {
+        restarting = false;
+        if (micOn) try { recog.start(); } catch(e) {}
+      }, 280);
+    }
+  };
+  return true;
+}
+
+function triggerWake() {
+  wakeActive = true;
+  document.getElementById('rippleWrap').classList.add('alive');
+  document.getElementById('micBtn').classList.add('wake');
+  document.getElementById('waves').classList.add('alive');
+  document.getElementById('statusLbl').textContent = 'HAN... BOL';
+  document.getElementById('statusLbl').classList.add('alive');
+  document.getElementById('transcript').classList.add('lit');
+  document.getElementById('liveText').textContent = '✨ Wake word mila! Command bolo...';
+  cmdTimer = setTimeout(resetWake, 5000);
+}
+
+function resetWake() {
+  wakeActive = false;
+  clearTimeout(cmdTimer);
+  document.getElementById('rippleWrap').classList.remove('alive');
+  document.getElementById('micBtn').classList.remove('wake');
+  document.getElementById('waves').classList.remove('alive');
+  document.getElementById('statusLbl').textContent = micOn ? '"MIKI" BOLO...' : 'TAP TO START';
+  document.getElementById('statusLbl').classList.remove('alive');
+  document.getElementById('transcript').classList.remove('lit');
+  showTranscript('');
+}
+
+function showTranscript(text) {
+  const el = document.getElementById('trTxt');
+  if (text) { el.textContent = text; el.className = 'tr-txt has'; }
+  else       { el.textContent = '"Miki" bolo phir command do...'; el.className = 'tr-txt'; }
+}
+
+function toggleMic() {
+  if (!recog && !initRecog()) return;
+  micOn = !micOn;
+  if (micOn) {
+    try { recog.start(); } catch(e) {}
+    document.getElementById('micBtn').classList.remove('off');
+    document.getElementById('statusLbl').textContent = '"MIKI" BOLO...';
+    document.getElementById('liveText').textContent = 'Sun raha hun...';
+    toast('🎤 MIKI active — "Miki bedroom light on" bolo');
+  } else {
+    recog.abort();
+    document.getElementById('micBtn').classList.add('off');
+    document.getElementById('liveText').textContent = 'Mic band hai';
+    resetWake();
+  }
+}
+
+// ─── SETTINGS SHEET ───────────────────────────────
+function openSheet() {
+  document.getElementById('cfg-host').value = cfg.host;
+  document.getElementById('cfg-user').value = cfg.user;
+  document.getElementById('cfg-pass').value = cfg.pass;
+  document.getElementById('sheet').classList.add('open');
+  document.getElementById('overlay').classList.add('show');
+}
+function closeSheet() {
+  document.getElementById('sheet').classList.remove('open');
+  document.getElementById('overlay').classList.remove('show');
+}
+function saveAndConnect() {
+  cfg.host = document.getElementById('cfg-host').value.trim();
+  cfg.user = document.getElementById('cfg-user').value.trim();
+  cfg.pass = document.getElementById('cfg-pass').value.trim();
+  localStorage.setItem('miki_host', cfg.host);
+  localStorage.setItem('miki_user', cfg.user);
+  localStorage.setItem('miki_pass', cfg.pass);
+  closeSheet(); mqttConnect();
+  toast('✅ Saved! Brain se connect ho raha hun...');
+}
+
+// ─── TOAST ────────────────────────────────────────
+let toastTimer = null;
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+// ─── INIT ─────────────────────────────────────────
+window.addEventListener('DOMContentLoaded', () => {
+  // Restore custom names
+  document.getElementById('name-s2').textContent = names.s2;
+  document.getElementById('name-s3').textContent = names.s3;
+
+  // Restore schedules
+  restoreScheduleUI();
+
+  // MQTT connect
+  mqttConnect();
+  if (!cfg.host) { setTimeout(openSheet, 700); toast('⚙️ Pehle MQTT config set karo'); }
+
+  // Schedule checker
+  setInterval(checkSchedules, 30000);
+  checkSchedules();
+
+  // Auto-start mic
+  setTimeout(() => { if (!micOn) toggleMic(); }, 900);
+});
+</script>
+</body>
+</html>
