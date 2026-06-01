@@ -379,12 +379,13 @@ SWITCHES.forEach(id => {
 
 // ─── MQTT ────────────────────────────────────────
 let mqttClient = null;
+const clientTag = 'jarvis-ui-' + Math.random().toString(16).slice(2,8);
 
 function mqttConnect() {
   if (!cfg.host || !cfg.user || !cfg.pass) { setConnUI('off'); return; }
   if (mqttClient) { try { mqttClient.end(true); } catch(e){} }
   const url = `wss://${cfg.host}:8884/mqtt`;
-  const cid = 'miki-pwa-' + Math.random().toString(16).slice(2,8);
+  const cid = clientTag;
   mqttClient = mqtt.connect(url, {
     clientId: cid, username: cfg.user, password: cfg.pass,
     clean: true, reconnectPeriod: 4000, connectTimeout: 8000,
@@ -392,12 +393,26 @@ function mqttConnect() {
   });
   mqttClient.on('connect', () => {
     setConnUI('ok');
-    SWITCHES.forEach(id => mqttClient.subscribe(`${TOPIC_BASE}/${id}/status`));
+    SWITCHES.forEach(id => {
+      mqttClient.subscribe(`${TOPIC_BASE}/${id}/status`);
+      mqttClient.subscribe(`${TOPIC_BASE}/${id}/light`);
+      mqttClient.subscribe(`${TOPIC_BASE}/${id}/ui/state`);
+      mqttClient.subscribe(`${TOPIC_BASE}/${id}/ui/schedule`);
+      mqttClient.subscribe(`${TOPIC_BASE}/${id}/ui/name`);
+    });
   });
   mqttClient.on('message', (topic, payload) => {
+    const msg = payload.toString();
     SWITCHES.forEach(id => {
-      if (topic === `${TOPIC_BASE}/${id}/status`)
-        applyState(id, payload.toString() === 'ON', false);
+      if (
+        topic === `${TOPIC_BASE}/${id}/status` ||
+        topic === `${TOPIC_BASE}/${id}/light` ||
+        topic === `${TOPIC_BASE}/${id}/ui/state`
+      ) {
+        if (msg === 'ON' || msg === 'OFF') applyState(id, msg === 'ON', false);
+      }
+      if (topic === `${TOPIC_BASE}/${id}/ui/schedule`) applyRemoteSchedule(id, msg);
+      if (topic === `${TOPIC_BASE}/${id}/ui/name`) applyRemoteName(id, msg);
     });
   });
   mqttClient.on('error',    () => setConnUI('err'));
@@ -408,6 +423,13 @@ function mqttConnect() {
 function pub(id, val) {
   if (!mqttClient?.connected) { toast('⚠️ Brain connected nahi — settings check karo'); return false; }
   mqttClient.publish(`${TOPIC_BASE}/${id}/light`, val, { qos: 1, retain: true });
+  mqttClient.publish(`${TOPIC_BASE}/${id}/ui/state`, val, { qos: 1, retain: true });
+  return true;
+}
+
+function publishRetained(topic, val) {
+  if (!mqttClient?.connected) return false;
+  mqttClient.publish(topic, val, { qos: 1, retain: true });
   return true;
 }
 
@@ -450,9 +472,22 @@ function finishEdit(id) {
   const input = document.getElementById(`name-${id}`);
   if (!input) return;
   const val = input.value.trim().toUpperCase() || `SWITCH ${id.slice(1)}`;
-  names[id] = val;
-  if (id !== 's1') localStorage.setItem(`miki_name_${id}`, val);
-  input.outerHTML = `<div class="room-name" id="name-${id}">${val}</div>`;
+  setRoomName(id, val, true);
+  input.outerHTML = `<div class="room-name" id="name-${id}">${names[id]}</div>`;
+}
+
+function setRoomName(id, val, sync=false) {
+  const clean = (val || `SWITCH ${id.slice(1)}`).trim().toUpperCase();
+  names[id] = clean;
+  if (id !== 's1') localStorage.setItem(`miki_name_${id}`, clean);
+  const el = document.getElementById(`name-${id}`);
+  if (el) el.textContent = clean;
+  if (sync && id !== 's1') publishRetained(`${TOPIC_BASE}/${id}/ui/name`, clean);
+}
+
+function applyRemoteName(id, val) {
+  if (id === 's1' || !val.trim()) return;
+  setRoomName(id, val, false);
 }
 
 // ─── SCHEDULE (inside card) ───────────────────────
@@ -467,6 +502,7 @@ function saveSchedule(id) {
   schedules[id].on.time  = document.getElementById(`ton-${id}`).value;
   schedules[id].off.time = document.getElementById(`toff-${id}`).value;
   localStorage.setItem(`miki_sched_${id}`, JSON.stringify(schedules[id]));
+  publishSchedule(id);
 }
 
 function toggleSchedItem(id, type) {
@@ -476,7 +512,25 @@ function toggleSchedItem(id, type) {
   item.enabled = !item.enabled;
   btn.className = 'mini-toggle' + (item.enabled?' on':'');
   localStorage.setItem(`miki_sched_${id}`, JSON.stringify(schedules[id]));
+  publishSchedule(id);
   toast(item.enabled ? `✅ Auto-${type.toUpperCase()} active` : `⏸ Auto-${type.toUpperCase()} paused`);
+}
+
+function publishSchedule(id) {
+  publishRetained(`${TOPIC_BASE}/${id}/ui/schedule`, JSON.stringify(schedules[id]));
+}
+
+function applyRemoteSchedule(id, raw) {
+  try {
+    const next = JSON.parse(raw);
+    if (!next?.on || !next?.off) return;
+    schedules[id] = {
+      on:  { time: next.on.time || '', enabled: !!next.on.enabled },
+      off: { time: next.off.time || '', enabled: !!next.off.enabled },
+    };
+    localStorage.setItem(`miki_sched_${id}`, JSON.stringify(schedules[id]));
+    restoreScheduleUI();
+  } catch(e) {}
 }
 
 function restoreScheduleUI() {
@@ -489,7 +543,7 @@ function restoreScheduleUI() {
   });
 }
 
-// Check schedules every 30 sec
+// Check schedules every 5 sec
 function checkSchedules() {
   const now = new Date();
   const hh  = now.getHours();
@@ -811,6 +865,7 @@ function executeVoiceCmds(cmds) {
   cmds.forEach(c => applyState(c.id, c.action === 'ON'));
   if (cmds.length > 1) {
     const summary = cmds.map(c => `${names[c.id]} ${c.action}`).join(', ');
+    toast(`Done: ${summary}`);
   }
   resetWake();
   return true;
@@ -870,7 +925,6 @@ function initRecog() {
     }
 
     if (cmds) return executeVoiceCmds(cmds);
-        toast(`⚡ ${summary}`);
 
     clearTimeout(cmdTimer);
     cmdTimer = setTimeout(resetWake, 5000);
@@ -985,7 +1039,7 @@ window.addEventListener('DOMContentLoaded', () => {
   if (!cfg.host) { setTimeout(openSheet, 700); toast('⚙️ Pehle MQTT config set karo'); }
 
   // Schedule checker
-  setInterval(checkSchedules, 30000);
+  setInterval(checkSchedules, 5000);
   checkSchedules();
 
   // Auto-start mic
