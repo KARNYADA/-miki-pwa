@@ -392,28 +392,12 @@ function mqttConnect() {
   });
   mqttClient.on('connect', () => {
     setConnUI('ok');
-    // Switch state topics
     SWITCHES.forEach(id => mqttClient.subscribe(`${TOPIC_BASE}/${id}/status`));
-    // ★ Name sync topics — connect hote hi latest names milenge
-    SWITCHES.filter(id => id !== 's1').forEach(id =>
-      mqttClient.subscribe(`miki/${id}/name`)
-    );
   });
   mqttClient.on('message', (topic, payload) => {
-    const val = payload.toString().trim();
-    // Switch state
     SWITCHES.forEach(id => {
       if (topic === `${TOPIC_BASE}/${id}/status`)
-        applyState(id, val === 'ON', false);
-    });
-    // ★ Name sync — kisi bhi phone ne naam badla to yahan update hoga
-    SWITCHES.filter(id => id !== 's1').forEach(id => {
-      if (topic === `miki/${id}/name` && val) {
-        names[id] = val;
-        localStorage.setItem(`miki_name_${id}`, val);
-        const el = document.getElementById(`name-${id}`);
-        if (el) el.textContent = val;
-      }
+        applyState(id, payload.toString() === 'ON', false);
     });
   });
   mqttClient.on('error',    () => setConnUI('err'));
@@ -468,14 +452,7 @@ function finishEdit(id) {
   const val = input.value.trim().toUpperCase() || `SWITCH ${id.slice(1)}`;
   names[id] = val;
   if (id !== 's1') localStorage.setItem(`miki_name_${id}`, val);
-
-  // ★ SYNC: MQTT retained message se sabhi phones ko turant batao
-  if (mqttClient?.connected) {
-    mqttClient.publish(`miki/${id}/name`, val, { qos: 1, retain: true });
-  }
-
   input.outerHTML = `<div class="room-name" id="name-${id}">${val}</div>`;
-  toast(`✅ "${val}" — sabhi phones pe sync ho gaya`);
 }
 
 // ─── SCHEDULE (inside card) ───────────────────────
@@ -572,7 +549,8 @@ function similarity(a, b) {
 
 // Wake word target + known false-positive blacklist
 const WAKE_TARGET   = 'miki';
-const WAKE_ALIASES  = ['miki','mikki','meeki','micky','mickey','mikey','miky','vicky','vikki','nicky','nikki','ricky','riki','tiki',
+const WAKE_ALIASES  = ['miki','mikki','meeki','micky','mickey','mikey','miky'];
+const WAKE_BLACKLIST= ['vicky','vikki','nicky','nikki','ricky','riki','tiki',
                        'wiki','kiki','dicky','tricky','sticky','picky','bikey'];
 const WAKE_THRESHOLD = 80; // 80% similarity = accept
 
@@ -580,6 +558,8 @@ function isWakeWord(text) {
   const words = text.toLowerCase().trim().split(/[\s,]+/);
   return words.some(word => {
     if (word.length < 3) return false;
+    // Blacklist check — HIGHEST priority, overrides fuzzy
+    if (WAKE_BLACKLIST.includes(word)) return false;
     // Exact alias check
     if (WAKE_ALIASES.includes(word)) return true;
     // Fuzzy check against primary target
@@ -600,6 +580,87 @@ const VOC_OFF = ['off','band','bujha','bujhao','bandh','stop','rukao',
                  'bujha do','band kar','band karo','band kar do','off kar',
                  'off karo','off kar do','light off','turn off','switch off'];
 
+function normalizeVoiceText(text) {
+  return (' ' + text.toLowerCase()
+    .replace(/[^\w\s#]/g, ' ')
+    .replace(/\b(please|plz|hey|ok|okay|hello|sun|suno|jara|zara|bhai)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim() + ' ');
+}
+
+function phraseMatch(text, phrase) {
+  return text.includes(' ' + phrase.toLowerCase().trim() + ' ');
+}
+
+function compactWord(word) {
+  return word.replace(/(.)\1+/g, '$1').replace(/[aeiou]/g, '');
+}
+
+const SMART_WAKE_ALIASES = [
+  ...WAKE_ALIASES, 'mikky','meaky','mika','miku','micki','makee','mikkii','mikiya','micky mouse'
+];
+const SMART_WAKE_THRESHOLD = 75;
+
+function smartWakeScore(word) {
+  if (word.length < 3 || WAKE_BLACKLIST.includes(word)) return 0;
+  if (SMART_WAKE_ALIASES.includes(word)) return 100;
+  return Math.max(
+    similarity(word, WAKE_TARGET),
+    similarity(compactWord(word), compactWord(WAKE_TARGET))
+  );
+}
+
+function getSmartWakeInfo(text) {
+  const t = normalizeVoiceText(text);
+  const words = t.trim().split(/\s+/).filter(Boolean);
+  let best = { found: false, score: 0, word: '', commandText: t };
+
+  for (const alias of SMART_WAKE_ALIASES) {
+    if (phraseMatch(t, alias)) {
+      const commandText = t.replace(new RegExp('\\b' + alias.replace(/\s+/g, '\\s+') + '\\b', 'i'), ' ');
+      return { found: true, score: 100, word: alias, commandText: normalizeVoiceText(commandText) };
+    }
+  }
+
+  for (const word of words) {
+    const score = smartWakeScore(word);
+    if (score > best.score) {
+      best = {
+        found: score >= SMART_WAKE_THRESHOLD,
+        score,
+        word,
+        commandText: normalizeVoiceText(t.replace(new RegExp('\\b' + word + '\\b', 'i'), ' '))
+      };
+    }
+  }
+  return best;
+}
+
+function hasVoicePhrase(text, phrases) {
+  return phrases.some(w => phraseMatch(text, w));
+}
+
+function fuzzyHasWord(text, words, minScore = 78) {
+  const tokens = text.trim().split(/\s+/).filter(w => w.length > 2);
+  return tokens.some(token => words.some(word => word.length > 2 && similarity(token, word) >= minScore));
+}
+
+function getVoiceAction(text) {
+  const t = normalizeVoiceText(text);
+  const onWords = [...VOC_ON, 'own','jlao','chaalu','shuru','lagao','laga do'];
+  const offWords = [...VOC_OFF, 'of','bund','bnd','band kardo','hata do'];
+  const isOn = hasVoicePhrase(t, onWords) || fuzzyHasWord(t, ['jalao','chalu','start','lagao']);
+  const isOff = hasVoicePhrase(t, offWords) || fuzzyHasWord(t, ['band','bujhao','stop']);
+  if (isOn && !isOff) return 'ON';
+  if (isOff && !isOn) return 'OFF';
+  if (isOn && isOff) {
+    const lastOn = Math.max(...onWords.map(w => t.lastIndexOf(' ' + w + ' ')));
+    const lastOff = Math.max(...offWords.map(w => t.lastIndexOf(' ' + w + ' ')));
+    return lastOff > lastOn ? 'OFF' : 'ON';
+  }
+  return null;
+}
+
 // Static room aliases (always checked)
 const ROOM_ALIASES = {
   s1: ['bedroom','bed room','bed','kamra','kamre','sone','soone',
@@ -607,24 +668,24 @@ const ROOM_ALIASES = {
        'pehla','pehli','ek number','1 number','#1','one'],
   s2: ['hall','drawing room','drawing','living room','living','baithak',
        'switch 2','switch two','switch to','switch too','number 2','number two','no 2',
-       'doosra','doosri','do number','2 number','#2','two','to '],
-  s3: ['kitchen','rasoi','khana','balcony','terrace','roof','chat',
+       'doosra','doosri','dusra','dusri','do number','2 number','#2','two','too'],
+  s3: ['kitchen','rasoi','khana','cook','balcony','terrace','roof','chat','chhat','gate',
        'switch 3','switch three','number 3','number three','no 3',
        'teesra','teesri','teen number','3 number','#3','three'],
 };
 
 function parseSwitchId(text) {
-  const t = ' ' + text.toLowerCase().trim() + ' ';
+  const t = normalizeVoiceText(text);
 
   // ① Check current custom names first (user ne jo naam rakha ho)
   for (const id of SWITCHES) {
-    const customName = names[id].toLowerCase();
-    if (customName.length > 2 && t.includes(customName)) return id;
+    const customName = normalizeVoiceText(names[id]).trim();
+    if (customName.length > 2 && phraseMatch(t, customName)) return id;
   }
 
   // ② Check static + number aliases
   for (const [id, aliases] of Object.entries(ROOM_ALIASES)) {
-    if (aliases.some(a => t.includes(a))) return id;
+    if (aliases.some(a => phraseMatch(t, a))) return id;
   }
 
   // ③ Last resort — digit/word number at end of text
@@ -647,14 +708,12 @@ function parseSwitchId(text) {
 const VOC_ALL = ['sab','sabhi','all','poora','saare','saari','everything','har','dono','both'];
 
 function parseCmds(text) {
-  const t = ' ' + text.toLowerCase().trim() + ' ';
-  const isOn  = VOC_ON.some(w  => t.includes(w));
-  const isOff = VOC_OFF.some(w => t.includes(w));
-  if (!isOn && !isOff) return null;
-  const action = isOn ? 'ON' : 'OFF';
+  const t = normalizeVoiceText(text);
+  const action = getVoiceAction(t);
+  if (!action) return null;
 
   // "sab" / "all" → all switches
-  if (VOC_ALL.some(w => t.includes(' '+w+' ') || t.includes(' '+w))) {
+  if (VOC_ALL.some(w => phraseMatch(t, w))) {
     return SWITCHES.map(id => ({ id, action }));
   }
 
@@ -663,13 +722,13 @@ function parseCmds(text) {
 
   // Check custom names (fuzzy too — "hall" matches "HALL" etc.)
   for (const id of SWITCHES) {
-    const n = names[id].toLowerCase();
-    if (n.length > 2 && t.includes(n)) matched.add(id);
+    const n = normalizeVoiceText(names[id]).trim();
+    if (n.length > 2 && (phraseMatch(t, n) || similarity(t.trim(), n) >= 82)) matched.add(id);
   }
 
   // Check static aliases
   for (const [id, aliases] of Object.entries(ROOM_ALIASES)) {
-    if (aliases.some(a => t.includes(' '+a+' ') || t.includes(' '+a) || t.includes(a+' ')))
+    if (aliases.some(a => phraseMatch(t, a) || fuzzyHasWord(t, [a], 86)))
       matched.add(id);
   }
 
@@ -736,6 +795,25 @@ let micOn      = false;
 let wakeActive = false;
 let cmdTimer   = null;
 let restarting = false;
+let lastVoiceActionKey = '';
+let lastVoiceActionAt = 0;
+
+function executeVoiceCmds(cmds) {
+  const key = cmds.map(c => `${c.id}:${c.action}`).sort().join('|');
+  const now = Date.now();
+  if (key === lastVoiceActionKey && now - lastVoiceActionAt < 1800) return true;
+  lastVoiceActionKey = key;
+  lastVoiceActionAt = now;
+
+  clearTimeout(cmdTimer);
+  cmds.forEach(c => applyState(c.id, c.action === 'ON'));
+  if (cmds.length > 1) {
+    const summary = cmds.map(c => `${names[c.id]} ${c.action}`).join(', ');
+    toast(`âš¡ ${summary}`);
+  }
+  resetWake();
+  return true;
+}
 
 function initRecog() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -743,7 +821,7 @@ function initRecog() {
   recog = new SR();
   recog.continuous     = true;
   recog.interimResults = true;
-  recog.maxAlternatives= 6;
+  recog.maxAlternatives= 10;
 
   // ★ KEY FIX: en-IN = Hinglish mode + "Miki" sahi se sunata hai
   recog.lang = 'en-IN';
@@ -760,6 +838,21 @@ function initRecog() {
     document.getElementById('liveText').textContent = texts.join(' | ') || '...';
 
     if (!wakeActive) {
+      let wakeInfo = null;
+      for (const t of texts) {
+        const info = getSmartWakeInfo(t);
+        if (info.found && (!wakeInfo || info.score > wakeInfo.score)) wakeInfo = info;
+      }
+      if (wakeInfo) {
+        const sameSentenceCmds = parseCmds(wakeInfo.commandText);
+        if (sameSentenceCmds) {
+          showTranscript(best);
+          executeVoiceCmds(sameSentenceCmds);
+        } else {
+          triggerWake();
+        }
+        return;
+      }
       // ★ STRICT CHECK: check all alternatives but reject false positives
       const foundWake = texts.some(t => isWakeWord(t));
       if (foundWake) triggerWake();
@@ -776,6 +869,7 @@ function initRecog() {
     }
 
     if (cmds) {
+      return executeVoiceCmds(cmds);
       clearTimeout(cmdTimer);
       // Execute ALL matched commands
       cmds.forEach(c => applyState(c.id, c.action === 'ON'));
