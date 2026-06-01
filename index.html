@@ -392,12 +392,28 @@ function mqttConnect() {
   });
   mqttClient.on('connect', () => {
     setConnUI('ok');
+    // Switch state topics
     SWITCHES.forEach(id => mqttClient.subscribe(`${TOPIC_BASE}/${id}/status`));
+    // ★ Name sync topics — connect hote hi latest names milenge
+    SWITCHES.filter(id => id !== 's1').forEach(id =>
+      mqttClient.subscribe(`miki/${id}/name`)
+    );
   });
   mqttClient.on('message', (topic, payload) => {
+    const val = payload.toString().trim();
+    // Switch state
     SWITCHES.forEach(id => {
       if (topic === `${TOPIC_BASE}/${id}/status`)
-        applyState(id, payload.toString() === 'ON', false);
+        applyState(id, val === 'ON', false);
+    });
+    // ★ Name sync — kisi bhi phone ne naam badla to yahan update hoga
+    SWITCHES.filter(id => id !== 's1').forEach(id => {
+      if (topic === `miki/${id}/name` && val) {
+        names[id] = val;
+        localStorage.setItem(`miki_name_${id}`, val);
+        const el = document.getElementById(`name-${id}`);
+        if (el) el.textContent = val;
+      }
     });
   });
   mqttClient.on('error',    () => setConnUI('err'));
@@ -452,7 +468,14 @@ function finishEdit(id) {
   const val = input.value.trim().toUpperCase() || `SWITCH ${id.slice(1)}`;
   names[id] = val;
   if (id !== 's1') localStorage.setItem(`miki_name_${id}`, val);
+
+  // ★ SYNC: MQTT retained message se sabhi phones ko turant batao
+  if (mqttClient?.connected) {
+    mqttClient.publish(`miki/${id}/name`, val, { qos: 1, retain: true });
+  }
+
   input.outerHTML = `<div class="room-name" id="name-${id}">${val}</div>`;
+  toast(`✅ "${val}" — sabhi phones pe sync ho gaya`);
 }
 
 // ─── SCHEDULE (inside card) ───────────────────────
@@ -557,8 +580,6 @@ function isWakeWord(text) {
   const words = text.toLowerCase().trim().split(/[\s,]+/);
   return words.some(word => {
     if (word.length < 3) return false;
-    // Blacklist check — HIGHEST priority, overrides fuzzy
-    if (WAKE_BLACKLIST.includes(word)) return false;
     // Exact alias check
     if (WAKE_ALIASES.includes(word)) return true;
     // Fuzzy check against primary target
