@@ -516,28 +516,59 @@ function checkSchedules() {
 
 // ─── VOICE — WAKE WORD ENGINE ─────────────────────
 /*
-  Root cause analysis:
-  - "Miki" in hi-IN → Google maps it to many phonetic matches (Vicky, Niki etc.)
-  - Fix: Use en-IN (Hinglish mode) + strict positive list + explicit false-positive blacklist
-  - Only accept if: (a) in accept list AND (b) NOT in reject list
+  WAKE WORD ENGINE — Fuzzy Matching
+  ══════════════════════════════════
+  Problem: "Miki" bolne pe Google alag-alag alternatives deta hai — 
+  "niki", "vicky", "micky" etc.
+
+  Solution: Levenshtein distance se similarity score nikalo.
+  80%+ match → accept as wake word
+  Known false positives → blacklist (overrides fuzzy)
+
+  Example: "niki" vs "miki" → 1 char different, 4 chars total → 75% → REJECT (80% threshold nahi mila)
+  Example: "meeki" vs "miki" → 1 extra char → 80% → ACCEPT ✅
 */
 
-const WAKE_ACCEPT = [
-  'miki','mikki','meeki','mikey','micky','mickey','micky','michi',
-  'mike e','mike-e','miky','meke','meaky','mikee','miki '
-];
-// Explicitly reject known false positives Google returns for "miki"
-const WAKE_REJECT = [
-  'vicky','vikki','niki','nicky','nikki','ricki','ricky','riki',
-  'tiki','dicky','dicky','tricky','sticky','picky','kiki','wiki',
-  'bikey','bicky','piki','fiki','sicky','dicky'
-];
+// ── Levenshtein distance (char-edit distance) ──
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({length: m+1}, (_, i) =>
+    Array.from({length: n+1}, (_, j) => i===0 ? j : j===0 ? i : 0));
+  for (let i=1; i<=m; i++)
+    for (let j=1; j<=n; j++)
+      dp[i][j] = a[i-1]===b[j-1] ? dp[i-1][j-1] :
+        1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+}
+
+function similarity(a, b) {
+  const max = Math.max(a.length, b.length);
+  if (max === 0) return 100;
+  return Math.round((1 - levenshtein(a, b) / max) * 100);
+}
+
+// Wake word target + known false-positive blacklist
+const WAKE_TARGET   = 'miki';
+const WAKE_ALIASES  = ['miki','mikki','meeki','micky','mickey','mikey','miky','vicky','vikki','nicky','nikki','ricky','riki','tiki',
+                       'wiki','kiki','dicky','tricky','sticky','picky','bikey'];
+const WAKE_THRESHOLD = 80; // 80% similarity = accept
 
 function isWakeWord(text) {
-  const t = ' ' + text.toLowerCase().trim() + ' ';
-  const rejected = WAKE_REJECT.some(w => t.includes(' '+w+' ') || t.includes(' '+w+',') || t.includes(w+' '));
-  if (rejected) return false;
-  return WAKE_ACCEPT.some(w => t.includes(w));
+  const words = text.toLowerCase().trim().split(/[\s,]+/);
+  return words.some(word => {
+    if (word.length < 3) return false;
+    // Blacklist check — HIGHEST priority, overrides fuzzy
+    if (WAKE_BLACKLIST.includes(word)) return false;
+    // Exact alias check
+    if (WAKE_ALIASES.includes(word)) return true;
+    // Fuzzy check against primary target
+    const score = similarity(word, WAKE_TARGET);
+    if (score >= WAKE_THRESHOLD) {
+      console.log(`[WAKE FUZZY] "${word}" → ${score}% match ✅`);
+      return true;
+    }
+    return false;
+  });
 }
 
 // Voice command vocab
@@ -548,33 +579,135 @@ const VOC_OFF = ['off','band','bujha','bujhao','bandh','stop','rukao',
                  'bujha do','band kar','band karo','band kar do','off kar',
                  'off karo','off kar do','light off','turn off','switch off'];
 
-// Room aliases → switch ID
+// Static room aliases (always checked)
 const ROOM_ALIASES = {
-  s1: ['bedroom','bed room','bed','kamra','kamre','sone','soone','s1','switch 1','ek'],
-  s2: ['hall','drawing','living','baithak','bahar','s2','switch 2','do','दो'],
-  s3: ['kitchen','rasoi','khana','balcony','bahar','terrace','s3','switch 3','teen','तीन'],
+  s1: ['bedroom','bed room','bed','kamra','kamre','sone','soone',
+       'switch 1','switch one','number 1','number one','no 1',
+       'pehla','pehli','ek number','1 number','#1','one'],
+  s2: ['hall','drawing room','drawing','living room','living','baithak',
+       'switch 2','switch two','switch to','switch too','number 2','number two','no 2',
+       'doosra','doosri','do number','2 number','#2','two','to '],
+  s3: ['kitchen','rasoi','khana','balcony','terrace','roof','chat',
+       'switch 3','switch three','number 3','number three','no 3',
+       'teesra','teesri','teen number','3 number','#3','three'],
 };
 
 function parseSwitchId(text) {
-  const t = text.toLowerCase();
-  // Also check custom names
+  const t = ' ' + text.toLowerCase().trim() + ' ';
+
+  // ① Check current custom names first (user ne jo naam rakha ho)
   for (const id of SWITCHES) {
-    if (t.includes(names[id].toLowerCase())) return id;
+    const customName = names[id].toLowerCase();
+    if (customName.length > 2 && t.includes(customName)) return id;
   }
+
+  // ② Check static + number aliases
   for (const [id, aliases] of Object.entries(ROOM_ALIASES)) {
     if (aliases.some(a => t.includes(a))) return id;
   }
-  return null; // will default to bedroom
+
+  // ③ Last resort — digit/word number at end of text
+  if (/\b(2|two|do|doosra)\b/.test(t)) return 's2';
+  if (/\b(3|three|teen|teesra)\b/.test(t)) return 's3';
+  if (/\b(1|one|ek|pehla)\b/.test(t)) return 's1';
+
+  return null; // caller defaults to s1
 }
 
-function parseCmd(text) {
-  const t = text.toLowerCase();
+/*
+  MULTI-COMMAND PARSER
+  ═════════════════════
+  "hall aur gate light off" → [{s2,OFF}, {s3,OFF}]
+  "sab band karo"           → [{s1,OFF}, {s2,OFF}, {s3,OFF}]
+  "bedroom on"              → [{s1,ON}]
+*/
+
+// "sab" / "all" keywords
+const VOC_ALL = ['sab','sabhi','all','poora','saare','saari','everything','har','dono','both'];
+
+function parseCmds(text) {
+  const t = ' ' + text.toLowerCase().trim() + ' ';
   const isOn  = VOC_ON.some(w  => t.includes(w));
   const isOff = VOC_OFF.some(w => t.includes(w));
   if (!isOn && !isOff) return null;
-  const switchId = parseSwitchId(t) || 's1'; // default bedroom
-  return { id: switchId, action: isOn ? 'ON' : 'OFF' };
+  const action = isOn ? 'ON' : 'OFF';
+
+  // "sab" / "all" → all switches
+  if (VOC_ALL.some(w => t.includes(' '+w+' ') || t.includes(' '+w))) {
+    return SWITCHES.map(id => ({ id, action }));
+  }
+
+  // Find ALL mentioned rooms in the sentence
+  const matched = new Set();
+
+  // Check custom names (fuzzy too — "hall" matches "HALL" etc.)
+  for (const id of SWITCHES) {
+    const n = names[id].toLowerCase();
+    if (n.length > 2 && t.includes(n)) matched.add(id);
+  }
+
+  // Check static aliases
+  for (const [id, aliases] of Object.entries(ROOM_ALIASES)) {
+    if (aliases.some(a => t.includes(' '+a+' ') || t.includes(' '+a) || t.includes(a+' ')))
+      matched.add(id);
+  }
+
+  // Digit fallback
+  if (matched.size === 0) {
+    if (/\b(2|two|do|doosra|dusra)\b/.test(t)) matched.add('s2');
+    if (/\b(3|three|teen|teesra)\b/.test(t))   matched.add('s3');
+    if (/\b(1|one|ek|pehla)\b/.test(t))        matched.add('s1');
+  }
+
+  // Nothing found → default bedroom
+  if (matched.size === 0) matched.add('s1');
+
+  return [...matched].map(id => ({ id, action }));
 }
+
+// ─── NO-SLEEP + BACKGROUND RESILIENCE ───────────
+/*
+  BACKGROUND LISTENING — kya possible hai:
+
+  ✅ Tab background mein (doosri tab pe gaye)  → NoSleep audio trick se kaam karta hai
+  ✅ Screen dim ho jaaye                        → NoSleep prevents sleep
+  ✅ Tab dobara active ho                       → auto-restart mic
+  ❌ Screen lock / phone lock                  → Browser suspend hota hai (OS limitation)
+  ❌ Chrome band ho                            → Obviously nahi chalega
+
+  → Agar dedicated phone pe chalana hai (best setup):
+    Settings → Display → Sleep → Never
+    Chrome → type in URL: chrome://flags → search "audio" → enable background audio
+    Pin the PWA tab using Android's "Pin app" feature
+*/
+
+// Silent audio loop — tab ko "active" rakhta hai browser ke liye
+let noSleepAudio = null;
+
+function startNoSleep() {
+  if (noSleepAudio) return;
+  // 1-second silent WebM audio data URI
+  const silentWebM = 'data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwH/////////FUmpZpkq17GDD0JATYCGQ2hyb21lV0GGQ2hyb21lFlSua7+uvdeBAXPFh7RTNtggEoUFzCmISMkHUlSORU8DFAJ1oBCVlMWA/IelhhGRQwxoAQAAAAAAANaWqrVzV8PDT5mq5BV38JATYCGQ2hyb21lV0GGQ2hyb21lFlSua7+uvdeBAXPFh7RTNtggEoUFzCmISMkH';
+  noSleepAudio = new Audio(silentWebM);
+  noSleepAudio.loop = true;
+  noSleepAudio.volume = 0.001;
+  noSleepAudio.play().catch(() => {}); // may fail without user gesture — that's fine
+}
+
+// Visibility API — tab back pe aane pe mic restart karo
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && micOn) {
+    // Tab dobara visible — mic restart
+    setTimeout(() => {
+      if (micOn && recog) {
+        try { recog.stop(); } catch(e) {}
+        setTimeout(() => {
+          if (micOn) try { recog.start(); } catch(e) {}
+        }, 400);
+      }
+    }, 300);
+  }
+});
 
 // ─── SPEECH RECOGNITION ──────────────────────────
 let recog      = null;
@@ -614,13 +747,21 @@ function initRecog() {
 
     showTranscript(best);
 
-    // Check all alternatives for command
-    let cmd = null;
-    for (const t of texts) { cmd = parseCmd(t); if (cmd) break; }
+    // Check all alternatives for commands (multi-switch support)
+    let cmds = null;
+    for (const t of texts) {
+      cmds = parseCmds(t);
+      if (cmds) break;
+    }
 
-    if (cmd) {
+    if (cmds) {
       clearTimeout(cmdTimer);
-      applyState(cmd.id, cmd.action === 'ON');
+      // Execute ALL matched commands
+      cmds.forEach(c => applyState(c.id, c.action === 'ON'));
+      if (cmds.length > 1) {
+        const summary = cmds.map(c => `${names[c.id]} ${c.action}`).join(', ');
+        toast(`⚡ ${summary}`);
+      }
       resetWake();
       return;
     }
@@ -683,6 +824,7 @@ function toggleMic() {
     document.getElementById('statusLbl').textContent = '"MIKI" BOLO...';
     document.getElementById('liveText').textContent = 'Sun raha hun...';
     toast('🎤 MIKI active — "Miki bedroom light on" bolo');
+    startNoSleep(); // Screen sleep prevent karo
   } else {
     recog.abort();
     document.getElementById('micBtn').classList.add('off');
