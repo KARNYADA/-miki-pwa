@@ -1,6 +1,6 @@
 {
-  "name": "MIKI Smart Home",
-  "short_name": "MIKI",
+  "name": "JARVIS Smart Home",
+  "short_name": "JARVIS",
   "description": "Voice-controlled smart light control",
   "start_url": "/-miki-pwa/",
    "scope": "/-miki-pwa/",
@@ -17,3 +17,5 @@
     }
   ]
 }
+
+
