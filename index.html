@@ -6,9 +6,9 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="MIKI">
+  <meta name="apple-mobile-web-app-title" content="JARVIS">
   <meta name="theme-color" content="#08080f">
-  <title>MIKI</title>
+  <title>JARVIS</title>
   <link rel="manifest" href="manifest.json">
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
@@ -151,7 +151,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
   <!-- HEADER -->
   <div class="header">
     <div class="brand">
-      <div class="wordmark">MIKI</div>
+      <div class="wordmark">JARVIS</div>
       <div class="by-line">SMART HOME · BY <span>KARN YADAV</span></div>
     </div>
     <div class="pill" id="connPill"><div class="dot"></div><span id="connTxt">CONNECTING</span></div>
@@ -185,7 +185,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
   <!-- TRANSCRIPT -->
   <div class="transcript" id="transcript">
     <span class="tr-ico">🎙</span>
-    <span class="tr-txt" id="trTxt">"Miki" bolo phir command do...</span>
+    <span class="tr-txt" id="trTxt">"Jarvis" bolo phir command do...</span>
   </div>
 
   <!-- SECTION: ROOMS -->
@@ -316,7 +316,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
     </div>
   </div>
 
-  <div class="footer">MIKI · SMART HOME SYSTEM · <span>KARN YADAV</span></div>
+  <div class="footer">JARVIS · SMART HOME SYSTEM · <span>KARN YADAV</span></div>
 </div>
 
 <!-- SETTINGS FAB -->
@@ -341,7 +341,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 
 <script>
 /* ═══════════════════════════════════════════════════
-   MIKI — v3  |  Smart Home System
+   JARVIS — v3  |  Smart Home System
    Author: Karn Yadav
 ═══════════════════════════════════════════════════ */
 
@@ -518,15 +518,15 @@ function checkSchedules() {
 /*
   WAKE WORD ENGINE — Fuzzy Matching
   ══════════════════════════════════
-  Problem: "Miki" bolne pe Google alag-alag alternatives deta hai — 
-  "niki", "vicky", "micky" etc.
+  Problem: "Jarvis" bolne pe Google alag-alag alternatives deta hai -
+  "jervish", "jaarvis", "jarved" etc.
 
   Solution: Levenshtein distance se similarity score nikalo.
   80%+ match → accept as wake word
   Known false positives → blacklist (overrides fuzzy)
 
-  Example: "niki" vs "miki" → 1 char different, 4 chars total → 75% → REJECT (80% threshold nahi mila)
-  Example: "meeki" vs "miki" → 1 extra char → 80% → ACCEPT ✅
+  Example: "jervish" vs "jarvis" -> close match -> ACCEPT
+  Example: "jarved" is included as a known alias -> ACCEPT
 */
 
 // ── Levenshtein distance (char-edit distance) ──
@@ -549,10 +549,12 @@ function similarity(a, b) {
 
 // Wake word target + known false-positive blacklist
 const WAKE_TARGET   = 'jarvis';
-const WAKE_ALIASES  = ['jarvis','jarvish','javed','jaarvish','jervish','jaarvis','jerved','jarrvish'.'jarved'];
-const WAKE_BLACKLIST= ['vicky','vikki','nicky','nikki','ricky','riki','tiki',
-                       'wiki','kiki','dicky','tricky','sticky','picky','bikey'];
-const WAKE_THRESHOLD = 80; // 80% similarity = accept
+const WAKE_ALIASES  = [
+  'jarvis','jarvish','javed','jaarvish','jervish','jaarvis','jerved','jarrvish','jarved',
+  'jarbis','jarvice','jarves','jarvies','jarwis','zarvis','service'
+];
+const WAKE_BLACKLIST= ['canvas','serviceable','surface','office','device','switches'];
+const WAKE_THRESHOLD = 72; // Jarvis ke common mishearings ko accept karega
 
 function isWakeWord(text) {
   const words = text.toLowerCase().trim().split(/[\s,]+/);
@@ -597,9 +599,9 @@ function compactWord(word) {
 }
 
 const SMART_WAKE_ALIASES = [
-  ...WAKE_ALIASES, 'mikky','meaky','mika','miku','micki','makee','mikkii','mikiya','micky mouse'
+  ...WAKE_ALIASES, 'jar','jarvi','jarviss','jarvesh','jaarves','jervis','jervais','travis'
 ];
-const SMART_WAKE_THRESHOLD = 75;
+const SMART_WAKE_THRESHOLD = 72;
 
 function smartWakeScore(word) {
   if (word.length < 3 || WAKE_BLACKLIST.includes(word)) return 0;
@@ -809,7 +811,6 @@ function executeVoiceCmds(cmds) {
   cmds.forEach(c => applyState(c.id, c.action === 'ON'));
   if (cmds.length > 1) {
     const summary = cmds.map(c => `${names[c.id]} ${c.action}`).join(', ');
-    toast(`âš¡ ${summary}`);
   }
   resetWake();
   return true;
@@ -823,7 +824,7 @@ function initRecog() {
   recog.interimResults = true;
   recog.maxAlternatives= 10;
 
-  // ★ KEY FIX: en-IN = Hinglish mode + "Miki" sahi se sunata hai
+  // en-IN = Hinglish mode + Jarvis commands ke liye best balance
   recog.lang = 'en-IN';
 
   recog.onresult = (e) => {
@@ -868,18 +869,8 @@ function initRecog() {
       if (cmds) break;
     }
 
-    if (cmds) {
-      return executeVoiceCmds(cmds);
-      clearTimeout(cmdTimer);
-      // Execute ALL matched commands
-      cmds.forEach(c => applyState(c.id, c.action === 'ON'));
-      if (cmds.length > 1) {
-        const summary = cmds.map(c => `${names[c.id]} ${c.action}`).join(', ');
+    if (cmds) return executeVoiceCmds(cmds);
         toast(`⚡ ${summary}`);
-      }
-      resetWake();
-      return;
-    }
 
     clearTimeout(cmdTimer);
     cmdTimer = setTimeout(resetWake, 5000);
@@ -918,7 +909,7 @@ function resetWake() {
   document.getElementById('rippleWrap').classList.remove('alive');
   document.getElementById('micBtn').classList.remove('wake');
   document.getElementById('waves').classList.remove('alive');
-  document.getElementById('statusLbl').textContent = micOn ? '"MIKI" BOLO...' : 'TAP TO START';
+  document.getElementById('statusLbl').textContent = micOn ? '"JARVIS" BOLO...' : 'TAP TO START';
   document.getElementById('statusLbl').classList.remove('alive');
   document.getElementById('transcript').classList.remove('lit');
   showTranscript('');
@@ -927,7 +918,7 @@ function resetWake() {
 function showTranscript(text) {
   const el = document.getElementById('trTxt');
   if (text) { el.textContent = text; el.className = 'tr-txt has'; }
-  else       { el.textContent = '"Miki" bolo phir command do...'; el.className = 'tr-txt'; }
+  else       { el.textContent = '"Jarvis" bolo phir command do...'; el.className = 'tr-txt'; }
 }
 
 function toggleMic() {
@@ -936,9 +927,9 @@ function toggleMic() {
   if (micOn) {
     try { recog.start(); } catch(e) {}
     document.getElementById('micBtn').classList.remove('off');
-    document.getElementById('statusLbl').textContent = '"MIKI" BOLO...';
+    document.getElementById('statusLbl').textContent = '"JARVIS" BOLO...';
     document.getElementById('liveText').textContent = 'Sun raha hun...';
-    toast('🎤 MIKI active — "Miki bedroom light on" bolo');
+    toast('Jarvis active - "Jarvis bedroom light on" bolo');
     startNoSleep(); // Screen sleep prevent karo
   } else {
     recog.abort();
