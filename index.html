@@ -316,6 +316,48 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
     </div>
   </div>
 
+  <!-- SWITCH 4: CUSTOM (editable) -->
+  <div id="card-s4" class="card">
+    <div class="card-main">
+      <div class="card-top">
+        <div class="room-meta">
+          <div class="icon-box" id="ico-s4">🔌</div>
+          <div class="room-info">
+            <div class="room-name-wrap">
+              <div class="room-name" id="name-s4">SWITCH 4</div>
+              <button class="edit-btn" onclick="startEdit('s4')" title="Naam badlo">✏️</button>
+            </div>
+            <div class="room-state" id="st-s4">Light band hai</div>
+          </div>
+        </div>
+        <button class="toggle" id="tgl-s4" onclick="toggleSwitch('s4')"></button>
+      </div>
+      <div class="btn-row">
+        <button class="act-btn btn-on"  onclick="setSwitch('s4','ON')">⚡ Jala do</button>
+        <button class="act-btn btn-off" onclick="setSwitch('s4','OFF')">✕ Band karo</button>
+      </div>
+    </div>
+    <div class="sched-divider"></div>
+    <div class="sched-section">
+      <div class="sched-header" onclick="toggleSched('s4')">
+        <div class="sched-title">⏰ AUTO SCHEDULE</div>
+        <span class="sched-chevron" id="chev-s4">▼</span>
+      </div>
+      <div class="sched-body" id="sched-s4">
+        <div class="sched-row">
+          <span class="sched-badge badge-on">💡 ON</span>
+          <input class="time-input" type="time" id="ton-s4" onchange="saveSchedule('s4')">
+          <button class="mini-toggle" id="mtgl-ton-s4" onclick="toggleSchedItem('s4','on')"></button>
+        </div>
+        <div class="sched-row">
+          <span class="sched-badge badge-off">🌑 OFF</span>
+          <input class="time-input" type="time" id="toff-s4" onchange="saveSchedule('s4')">
+          <button class="mini-toggle" id="mtgl-toff-s4" onclick="toggleSchedItem('s4','off')"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="footer">JARVIS · SMART HOME SYSTEM · <span>KARN YADAV</span></div>
 </div>
 
@@ -346,7 +388,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 ═══════════════════════════════════════════════════ */
 
 // ─── Config ──────────────────────────────────────
-const SWITCHES = ['s1','s2','s3'];
+const SWITCHES = ['s1','s2','s3','s4'];
 const TOPIC_BASE = 'miki';
 
 // MQTT
@@ -357,13 +399,14 @@ let cfg = {
 };
 
 // Switch state
-const state = { s1: false, s2: false, s3: false };
+const state = { s1: false, s2: false, s3: false, s4: false };
 
 // Custom names (editable)
 const names = {
   s1: 'BEDROOM',
   s2: localStorage.getItem('miki_name_s2') || 'SWITCH 2',
   s3: localStorage.getItem('miki_name_s3') || 'SWITCH 3',
+  s4: localStorage.getItem('miki_name_s4') || 'SWITCH 4',
 };
 
 // Schedules per switch
@@ -728,6 +771,8 @@ const ROOM_ALIASES = {
   s3: ['kitchen','rasoi','khana','cook','balcony','terrace','roof','chat','chhat','gate',
        'switch 3','switch three','number 3','number three','no 3',
        'teesra','teesri','teen number','3 number','#3','three'],
+  s4: ['switch 4','switch four','number 4','number four','no 4',
+       'chautha','chauthi','char number','chaar number','4 number','#4','four','for'],
 };
 
 function parseSwitchId(text) {
@@ -747,6 +792,7 @@ function parseSwitchId(text) {
   // ③ Last resort — digit/word number at end of text
   if (/\b(2|two|do|doosra)\b/.test(t)) return 's2';
   if (/\b(3|three|teen|teesra)\b/.test(t)) return 's3';
+  if (/\b(4|four|for|char|chaar|chautha)\b/.test(t)) return 's4';
   if (/\b(1|one|ek|pehla)\b/.test(t)) return 's1';
 
   return null; // caller defaults to s1
@@ -792,6 +838,7 @@ function parseCmds(text) {
   if (matched.size === 0) {
     if (/\b(2|two|do|doosra|dusra)\b/.test(t)) matched.add('s2');
     if (/\b(3|three|teen|teesra)\b/.test(t))   matched.add('s3');
+    if (/\b(4|four|for|char|chaar|chautha)\b/.test(t)) matched.add('s4');
     if (/\b(1|one|ek|pehla)\b/.test(t))        matched.add('s1');
   }
 
@@ -1030,6 +1077,7 @@ window.addEventListener('DOMContentLoaded', () => {
   // Restore custom names
   document.getElementById('name-s2').textContent = names.s2;
   document.getElementById('name-s3').textContent = names.s3;
+  document.getElementById('name-s4').textContent = names.s4;
 
   // Restore schedules
   restoreScheduleUI();
